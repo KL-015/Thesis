@@ -1432,13 +1432,13 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       });
       if (res.error) {
         console.error('Duties upsert error:', res.error);
-        showSyncNotification('✗ Failed to sync watch bill');
+        showSyncNotification(`✗ Failed to sync watch bill: ${res.error}`);
       } else {
         showSyncNotification('✓ Watch Bill (FOD / COOW / MOOW) saved & broadcast live across all devices!');
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('Duties upsert exception:', e);
-      showSyncNotification('✗ Failed to sync watch bill');
+      showSyncNotification(`✗ Failed to sync watch bill: ${e?.message || e}`);
     }
   };
 
