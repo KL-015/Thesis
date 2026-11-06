@@ -1,0 +1,6 @@
+{
+  "name": "MMMA FleetSync — Maritime Event & Schedule System",
+  "description": "Tactical operational scheduling, 24-hour military conflict detection, QD daily routines, grouped memo repository, duties, mustering, and admin account management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

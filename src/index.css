@@ -1,0 +1,241 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    color: #ffffff;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+    min-height: 100vh;
+    background-image: url('https://raw.githubusercontent.com/KL-015/Portfolio/bdadeee3cf1ceeecd5c81bafd7f59eeea1c86e0b/schoolbg.png');
+    background-size: cover;
+    background-position: center;
+    background-attachment: fixed;
+    background-repeat: no-repeat;
+    background-color: #0b1329;
+  }
+}
+
+.military-time, .font-mono {
+  font-family: 'JetBrains Mono', monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Glassmorphism Styles matching reference image */
+.glass-outer {
+  background: rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(28px) saturate(180%);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.28), inset 0 1px 1px 0 rgba(255, 255, 255, 0.35);
+  border-radius: 1.75rem;
+}
+
+.glass-panel {
+  background: rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  box-shadow: 0 12px 35px -5px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  border-radius: 1.25rem;
+}
+
+.glass-card {
+  background: rgba(255, 255, 255, 0.10);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.20);
+  box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  border-radius: 1rem;
+}
+
+.glass-card-subtle {
+  background: rgba(255, 255, 255, 0.07);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 0.875rem;
+}
+
+.glass-card-blue {
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.9) 0%, rgba(29, 78, 216, 0.95) 100%);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(147, 197, 253, 0.45);
+  box-shadow: 0 12px 30px rgba(37, 99, 235, 0.4), inset 0 1px 1px rgba(255, 255, 255, 0.4);
+  border-radius: 1.25rem;
+  color: #ffffff;
+}
+
+.glass-modal {
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(32px) saturate(180%);
+  -webkit-backdrop-filter: blur(32px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.5), inset 0 1px 1px rgba(255, 255, 255, 0.3);
+  border-radius: 1.75rem;
+  color: #ffffff;
+}
+
+.glass-input {
+  background: rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  color: #ffffff;
+  border-radius: 0.75rem;
+  transition: all 0.2s ease;
+}
+.glass-input::placeholder {
+  color: rgba(255, 255, 255, 0.45);
+}
+.glass-input:focus {
+  outline: none;
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(96, 165, 250, 0.8);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.25);
+}
+
+.glass-pill {
+  background: rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.85);
+  border-radius: 9999px;
+  transition: all 0.2s ease;
+}
+.glass-pill:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+}
+
+.glass-pill-active {
+  background: #2563eb;
+  border: 1px solid rgba(147, 197, 253, 0.4);
+  color: #ffffff;
+  font-weight: 600;
+  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.45);
+  border-radius: 9999px;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.25);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.4);
+}
+
+/* Universal Glassmorphism Adaptations for all Applet Views */
+.bg-white:not(button):not(input):not(span) {
+  background-color: rgba(255, 255, 255, 0.12) !important;
+  backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  border-color: rgba(255, 255, 255, 0.22) !important;
+  color: #ffffff;
+}
+
+/* Modal & Dialog Glass */
+.fixed.z-50 > div {
+  background-color: rgba(15, 23, 42, 0.88) !important;
+  backdrop-filter: blur(32px) saturate(180%);
+  -webkit-backdrop-filter: blur(32px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.25) !important;
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.6), inset 0 1px 1px rgba(255, 255, 255, 0.3) !important;
+  color: #ffffff !important;
+}
+
+/* Glass table headers and sub-panels */
+.bg-slate-50, .bg-slate-100, .bg-neutral-50, .bg-neutral-100, .bg-\[\#f8fafc\], .bg-\[\#f1f5f9\] {
+  background-color: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(255, 255, 255, 0.15) !important;
+}
+
+/* Glass borders */
+.border-slate-200, .border-neutral-200, .border-slate-100, .border-neutral-100, .border-\[\#cbd5e1\] {
+  border-color: rgba(255, 255, 255, 0.18) !important;
+}
+
+/* Text color contrast enhancements across all views */
+.text-slate-900, .text-neutral-900, .text-zinc-900, .text-gray-900,
+.text-slate-800, .text-neutral-800, .text-zinc-800, .text-gray-800,
+.text-\[\#1e293b\], .text-\[\#18181b\] {
+  color: #ffffff !important;
+}
+
+.text-slate-700, .text-neutral-700, .text-zinc-700, .text-gray-700,
+.text-slate-600, .text-neutral-600, .text-zinc-600, .text-gray-600 {
+  color: rgba(255, 255, 255, 0.90) !important;
+}
+
+.text-slate-500, .text-neutral-500, .text-zinc-500, .text-gray-500,
+.text-slate-400, .text-neutral-400, .text-zinc-400, .text-gray-400,
+.text-neutral-300, .text-slate-300, .text-zinc-300, .text-\[\#64748b\] {
+  color: rgba(255, 255, 255, 0.78) !important;
+}
+
+/* Badge and Colored Text High-Contrast Rules on Dark Glass */
+.text-blue-700, .text-blue-800, .text-blue-900, .text-indigo-700, .text-indigo-800, .text-indigo-900 {
+  color: #93c5fd !important;
+}
+.text-emerald-700, .text-emerald-800, .text-emerald-900, .text-green-700, .text-green-800 {
+  color: #6ee7b7 !important;
+}
+.text-amber-700, .text-amber-800, .text-amber-900, .text-yellow-700, .text-yellow-800 {
+  color: #fcd34d !important;
+}
+.text-red-700, .text-red-800, .text-red-900 {
+  color: #fca5a5 !important;
+}
+.text-cyan-700, .text-cyan-800, .text-cyan-900 {
+  color: #67e8f9 !important;
+}
+
+/* Badge container glass backgrounds */
+.bg-blue-50, .bg-indigo-50 {
+  background-color: rgba(37, 99, 235, 0.22) !important;
+  border-color: rgba(147, 197, 253, 0.35) !important;
+}
+.bg-emerald-50, .bg-green-50 {
+  background-color: rgba(16, 185, 129, 0.22) !important;
+  border-color: rgba(110, 231, 183, 0.35) !important;
+}
+.bg-amber-50, .bg-yellow-50 {
+  background-color: rgba(245, 158, 11, 0.22) !important;
+  border-color: rgba(252, 211, 77, 0.35) !important;
+}
+.bg-red-50 {
+  background-color: rgba(239, 68, 68, 0.22) !important;
+  border-color: rgba(252, 165, 165, 0.35) !important;
+}
+.bg-cyan-50 {
+  background-color: rgba(6, 182, 212, 0.22) !important;
+  border-color: rgba(103, 232, 249, 0.35) !important;
+}
+
+/* Form input elements */
+input[type="text"], input[type="email"], input[type="password"], input[type="number"], input[type="search"], input[type="date"], textarea, select {
+  background-color: rgba(255, 255, 255, 0.14) !important;
+  border-color: rgba(255, 255, 255, 0.24) !important;
+  color: #ffffff !important;
+}
+input::placeholder, textarea::placeholder {
+  color: rgba(255, 255, 255, 0.55) !important;
+}
+input:focus, textarea:focus, select:focus {
+  border-color: rgba(96, 165, 250, 0.8) !important;
+  background-color: rgba(255, 255, 255, 0.2) !important;
+}
+select option {
+  background-color: #0f172a !important;
+  color: #ffffff !important;
+}
