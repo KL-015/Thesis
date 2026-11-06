@@ -103,7 +103,7 @@ interface FleetContextType {
     dbError?: string;
   }>;
   updateMemorandum: (id: string, partial: Partial<Memorandum>) => Promise<boolean>;
-  deleteMemorandum: (id: string) => Promise<void> | void;
+  deleteMemorandum: (id: string) => Promise<void>;
 
   // Announcements
   announcements: Announcement[];
@@ -817,7 +817,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   // Add fleet event with conflict evaluation
-  const addFleetEvent = (
+  const addFleetEvent = async (
     event: Omit<FleetEvent, 'id' | 'createdAt' | 'createdBy' | 'createdByName'>
   ) => {
     if (!hasSchedulingPermission) {
