@@ -285,9 +285,9 @@ export const FleetCalendarView: React.FC<{ onOpenLogin: () => void }> = ({ onOpe
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* LEFT COLUMN: Calendar Month Grid */}
         <div className="lg:col-span-8">
-          <div className="bg-white/12 backdrop-blur-2xl rounded-3xl border border-white/25 p-6 shadow-[0_15px_40px_rgba(0,0,0,0.25)]">
+          <div className="bg-white/12 backdrop-blur-2xl rounded-3xl border border-white/25 p-3.5 sm:p-6 shadow-[0_15px_40px_rgba(0,0,0,0.25)]">
             {/* Calendar Controls */}
-            <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center justify-between mb-4 sm:mb-6">
               <h2 className="font-bold text-base sm:text-lg text-white">
                 {monthName}
               </h2>
@@ -316,7 +316,7 @@ export const FleetCalendarView: React.FC<{ onOpenLogin: () => void }> = ({ onOpe
             </div>
 
             {/* Weekdays Row */}
-            <div className="grid grid-cols-7 gap-2 mb-2 text-center text-xs font-bold text-white/70 uppercase tracking-wider">
+            <div className="grid grid-cols-7 gap-1 sm:gap-2 mb-2 text-center text-[10px] sm:text-xs font-bold text-white/70 uppercase tracking-wider">
               <div>Sun</div>
               <div>Mon</div>
               <div>Tue</div>
@@ -327,7 +327,7 @@ export const FleetCalendarView: React.FC<{ onOpenLogin: () => void }> = ({ onOpe
             </div>
 
             {/* Calendar Day Cells */}
-            <div className="grid grid-cols-7 gap-2">
+            <div className="grid grid-cols-7 gap-1 sm:gap-2">
               {calendarCells.map((cell, idx) => {
                 const isSelected = cell.dateStr === selectedDate;
                 const dayEvents = eventsByDate.get(cell.dateStr) || [];
@@ -341,9 +341,9 @@ export const FleetCalendarView: React.FC<{ onOpenLogin: () => void }> = ({ onOpe
                     <div
                       key={idx}
                       onClick={() => setSelectedDate(cell.dateStr)}
-                      className="bg-white/5 border border-white/10 rounded-2xl min-h-[72px] sm:min-h-[82px] p-2.5 flex flex-col justify-between cursor-pointer transition-colors hover:bg-white/10"
+                      className="bg-white/5 border border-white/10 rounded-xl sm:rounded-2xl min-h-[48px] sm:min-h-[82px] p-1.5 sm:p-2.5 flex flex-col justify-between cursor-pointer transition-colors hover:bg-white/10"
                     >
-                      <div className="text-right text-xs font-medium text-white/35">
+                      <div className="text-right text-[11px] sm:text-xs font-medium text-white/35">
                         {cell.dayNumber}
                       </div>
                       <div />
@@ -355,7 +355,7 @@ export const FleetCalendarView: React.FC<{ onOpenLogin: () => void }> = ({ onOpe
                   <div
                     key={idx}
                     onClick={() => setSelectedDate(cell.dateStr)}
-                    className={`rounded-2xl min-h-[72px] sm:min-h-[82px] p-2.5 flex flex-col justify-between cursor-pointer transition-all ${
+                    className={`rounded-xl sm:rounded-2xl min-h-[48px] sm:min-h-[82px] p-1.5 sm:p-2.5 flex flex-col justify-between cursor-pointer transition-all ${
                       isSelected
                         ? 'bg-blue-600 border border-blue-400/60 shadow-[0_4px_16px_rgba(37,99,235,0.5)] text-white'
                         : hasAnyEvent

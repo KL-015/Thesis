@@ -1,19 +1,31 @@
 @import "tailwindcss";
 
 @layer base {
+  html, body {
+    overflow-x: clip;
+    background-color: transparent;
+  }
+
   body {
     font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
     color: #ffffff;
     -webkit-font-smoothing: antialiased;
-    overflow-x: hidden;
     min-height: 100vh;
-    background-image: url('https://raw.githubusercontent.com/KL-015/Portfolio/bdadeee3cf1ceeecd5c81bafd7f59eeea1c86e0b/schoolbg.png');
-    background-size: cover;
-    background-position: center;
-    background-attachment: fixed;
-    background-repeat: no-repeat;
-    background-color: #0b1329;
   }
+
+  button, a, [role="button"] {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+.app-bg-layer {
+  background-color: #0b1329;
+  background-image: url('https://raw.githubusercontent.com/KL-015/Portfolio/bdadeee3cf1ceeecd5c81bafd7f59eeea1c86e0b/schoolbg.png');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  transform: translate3d(0, 0, 0);
 }
 
 .military-time, .font-mono {
@@ -239,3 +251,55 @@ select option {
   background-color: #0f172a !important;
   color: #ffffff !important;
 }
+
+/* Mobile GPU Performance Optimization (eliminates scroll & tap lag on phones) */
+@media (max-width: 768px) {
+  .backdrop-blur-3xl,
+  .backdrop-blur-2xl,
+  .backdrop-blur-xl,
+  .backdrop-blur-lg,
+  .backdrop-blur-md,
+  .backdrop-blur-sm,
+  .glass-outer,
+  .glass-panel,
+  .glass-card,
+  .glass-card-subtle,
+  .glass-card-blue,
+  .glass-modal,
+  .glass-input,
+  .glass-pill,
+  .bg-white:not(button):not(input):not(span),
+  .fixed.z-50 > div {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+
+  .bg-white\/12,
+  .bg-white\/10 {
+    background-color: rgba(15, 23, 42, 0.72) !important;
+  }
+
+  .bg-white:not(button):not(input):not(span) {
+    background-color: rgba(15, 23, 42, 0.74) !important;
+  }
+
+  .glass-outer,
+  .glass-panel,
+  .glass-card,
+  .glass-card-subtle {
+    background: rgba(15, 23, 42, 0.72) !important;
+  }
+
+  .shadow-\[0_20px_50px_rgba\(0\,0\,0\,0\.25\)\],
+  .shadow-\[0_15px_40px_rgba\(0\,0\,0\,0\.2\)\],
+  .shadow-\[0_15px_40px_rgba\(0\,0\,0\,0\.25\)\],
+  .shadow-\[0_12px_35px_rgba\(0\,0\,0\,0\.2\)\],
+  .shadow-\[0_25px_60px_rgba\(0\,0\,0\,0\.6\)\] {
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25) !important;
+  }
+
+  .animate-ping {
+    animation: none !important;
+  }
+}
+

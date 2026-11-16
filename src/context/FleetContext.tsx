@@ -416,9 +416,17 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, []);
 
-  // Fetch authoritative data from server proxy API & poll every 3 seconds
+  // Fetch authoritative data from server proxy API & poll every 5 seconds when visible
   useEffect(() => {
     let isMounted = true;
+
+    const setIfChanged = <T,>(
+      setter: React.Dispatch<React.SetStateAction<T>>,
+      nextValue: T
+    ) => {
+      const nextSig = JSON.stringify(nextValue);
+      setter((prev) => (JSON.stringify(prev) === nextSig ? prev : nextValue));
+    };
 
     const fetchSupabaseMemos = async (startEpoch: number) => {
       try {
@@ -441,7 +449,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             signatory: row.signatory,
             isPublicToCadets: row.is_public_to_cadets ?? true,
           }));
-          setMemos(loaded);
+          setIfChanged(setMemos, loaded);
         }
       } catch (err) {
         console.warn('Memos fetch notice:', err);
@@ -477,7 +485,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             map.set(key, existing?.password ? { ...o, password: existing.password } : o);
           }
           const nextUsers = Array.from(map.values());
-          setUsers(nextUsers);
+          setIfChanged(setUsers, nextUsers);
 
           // Sync logged-in user if their DB record changed
           setCurrentUser((prevCurrent) => {
@@ -490,7 +498,8 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             if (!matched || !matched.isActive) {
               return prevCurrent.role === 'admin' ? prevCurrent : null;
             }
-            return { ...matched, password: prevCurrent.password || matched.password };
+            const merged = { ...matched, password: prevCurrent.password || matched.password };
+            return JSON.stringify(prevCurrent) === JSON.stringify(merged) ? prevCurrent : merged;
           });
         }
       } catch (err) {
@@ -514,7 +523,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             createdByName: row.created_by_name || 'Fleet Officer',
             createdAt: row.created_at || toISODateString(new Date()),
           }));
-          setEvents(loaded);
+          setIfChanged(setEvents, loaded);
         }
       } catch (err) {
         console.warn('Events fetch notice:', err);
@@ -537,7 +546,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             postedBy: row.posted_by || 'usr-anon',
             postedByName: row.posted_by_name || 'Fleet Duty Officer',
           }));
-          setAnnouncements(loaded);
+          setIfChanged(setAnnouncements, loaded);
         }
       } catch (err) {
         console.warn('Announcements fetch notice:', err);
@@ -562,7 +571,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             station: row.station || 'Quarterdeck Main Desk',
             status: row.status || 'ON_WATCH',
           }));
-          setDutyRoster(loaded);
+          setIfChanged(setDutyRoster, loaded);
         }
       } catch (err) {
         console.warn('Duties fetch notice:', err);
@@ -586,7 +595,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               category: row.category || 'ROUTINE',
             }))
             .sort((a, b) => militaryTimeToMinutes(a.startTime) - militaryTimeToMinutes(b.startTime));
-          setDailyActivities(loaded);
+          setIfChanged(setDailyActivities, loaded);
         }
       } catch (err) {
         console.warn('Daily activities fetch notice:', err);
@@ -597,7 +606,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       try {
         const { data, error } = await apiGet<any[]>('standing-orders');
         if (!error && Array.isArray(data) && isMounted && mutationEpochRef.current === startEpoch) {
-          setStandingOrders(data.map((r: any) => r.order_text));
+          setIfChanged(setStandingOrders, data.map((r: any) => r.order_text));
         }
       } catch (err) {
         console.warn('Standing orders fetch notice:', err);
@@ -610,14 +619,20 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if (!error && Array.isArray(data) && isMounted && mutationEpochRef.current === startEpoch) {
           for (const item of data) {
             if (item.key === 'uniforms' && item.value) {
-              setUniformData(item.value);
+              setIfChanged(setUniformData, item.value);
             } else if (item.key === 'fleet_roster' && item.value) {
-              setFleetData(item.value);
+              setIfChanged(setFleetData, item.value);
             } else if (item.key === 'total_strength' && item.value) {
-              if (item.value.rows) setStrengthRows(item.value.rows);
-              if (item.value.asOf) setStrengthAsOf(item.value.asOf);
+              try {
+                const parsed =
+                  typeof item.value === 'string' ? JSON.parse(item.value) : item.value;
+                if (Array.isArray(parsed?.rows)) setIfChanged(setStrengthRows, parsed.rows);
+                if (parsed?.asOf !== undefined) setIfChanged(setStrengthAsOf, parsed.asOf);
+              } catch {
+                // ignore malformed JSON
+              }
             } else if (item.key === 'memo_groups' && Array.isArray(item.value)) {
-              setMemoGroups(item.value);
+              setIfChanged(setMemoGroups, item.value);
             }
           }
         }
@@ -628,6 +643,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     const fetchAllData = () => {
       if (!isMounted) return;
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
       const startEpoch = mutationEpochRef.current;
       fetchSupabaseMemos(startEpoch);
       fetchSupabaseOfficers(startEpoch);
@@ -641,12 +657,23 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     fetchAllData();
 
-    // Live sync polling interval (every 3 seconds) for cross-device & cross-account sync
-    const intervalId = setInterval(fetchAllData, 3000);
+    // Live sync polling interval (every 5 seconds when visible) for cross-device & cross-account sync
+    const intervalId = setInterval(fetchAllData, 5000);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        fetchAllData();
+      }
+    };
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+    }
 
     return () => {
       isMounted = false;
       clearInterval(intervalId);
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      }
     };
   }, []);
 

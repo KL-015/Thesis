@@ -1,10 +1,13 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { useFleet, selectActiveDuty } from '../../context/FleetContext';
 import {
   militaryTimeToMinutes,
   getCurrentMilitaryTime,
   toISODateString,
   formatMilitaryRange,
+  getActiveDailyActivity,
+  getUpcomingDailyActivities,
+  formatActivityTimeDisplay,
 } from '../../utils/timeConflict';
 import {
   Calendar,
@@ -28,16 +31,25 @@ export const DashboardView: React.FC<{ onOpenLogin: () => void }> = ({ onOpenLog
     currentUser,
   } = useFleet();
 
-  const currentMilitary = getCurrentMilitaryTime();
+  const [now, setNow] = useState<Date>(() => new Date());
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setNow(new Date());
+    }, 10000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const currentMilitary = getCurrentMilitaryTime(now);
   const currentMinutes = militaryTimeToMinutes(currentMilitary);
-  const todayStr = toISODateString(new Date());
+  const todayStr = toISODateString(now);
 
   const activeActivity = useMemo(() => {
-    return dailyActivities.find((act) => {
-      const s = militaryTimeToMinutes(act.startTime);
-      const e = militaryTimeToMinutes(act.endTime);
-      return currentMinutes >= s && currentMinutes < e;
-    });
+    return getActiveDailyActivity(dailyActivities, currentMinutes);
+  }, [dailyActivities, currentMinutes]);
+
+  const upcomingActivities = useMemo(() => {
+    return getUpcomingDailyActivities(dailyActivities, currentMinutes, 4);
   }, [dailyActivities, currentMinutes]);
 
   const todayEvents = useMemo(() => {
@@ -161,12 +173,12 @@ export const DashboardView: React.FC<{ onOpenLogin: () => void }> = ({ onOpenLog
                 </div>
               </div>
               <span className="text-xs font-mono text-emerald-200 bg-emerald-500/25 px-3 py-1 rounded-full border border-emerald-400/40 font-semibold shadow-2xs backdrop-blur-md">
-                Resets Daily
+                {dailyActivities.length} Activities
               </span>
             </div>
 
             <p className="text-xs text-white/70 mb-5 leading-relaxed">
-              Official Quarterdeck daily routine. Read-only reference for cadets that automatically clears and resets daily at midnight.
+              Official Quarterdeck daily routine synchronized live with the Activities &amp; Status Board.
             </p>
 
             {/* Currently Active Routine Box - Vibrant Electric Blue Glass Card matching reference */}
@@ -179,25 +191,38 @@ export const DashboardView: React.FC<{ onOpenLogin: () => void }> = ({ onOpenLog
                   {activeActivity ? activeActivity.name : 'Routine Deck Standby'}
                 </span>
                 <span className="font-mono text-xs text-blue-100 font-bold shrink-0 bg-white/20 border border-white/25 px-2 py-0.5 rounded-md shadow-2xs">
-                  {activeActivity ? formatMilitaryRange(activeActivity.startTime, activeActivity.endTime) : currentMilitary}
+                  {activeActivity
+                    ? formatActivityTimeDisplay(activeActivity.startTime, activeActivity.endTime)
+                    : currentMilitary}
                 </span>
               </div>
               <p className="text-[11px] text-blue-100/90">
-                {activeActivity ? activeActivity.description : 'Night standby watch in effect.'}
+                {activeActivity
+                  ? activeActivity.description &&
+                    activeActivity.description.toUpperCase() !== activeActivity.name.toUpperCase()
+                    ? `${activeActivity.description}${activeActivity.location ? ` · ${activeActivity.location}` : ''}`
+                    : activeActivity.location || 'Academy Grounds'
+                  : 'Night standby watch in effect.'}
               </p>
             </div>
 
-            {/* Routine Highlights */}
+            {/* Upcoming Synced Daily Activities */}
             <div className="space-y-1.5 text-xs text-white/80">
               <span className="text-[10px] uppercase font-bold text-white/50 tracking-wider">
-                Daily Highlights
+                Upcoming QD Schedule
               </span>
-              {dailyActivities.slice(3, 6).map((act) => (
-                <div key={act.id} className="flex items-center justify-between py-1.5 border-b border-white/10">
-                  <span className="text-white/90 font-medium truncate max-w-[200px]">{act.name}</span>
-                  <span className="font-mono text-[11px] text-white/50 font-medium">{formatMilitaryRange(act.startTime, act.endTime)}</span>
-                </div>
-              ))}
+              {upcomingActivities.length === 0 ? (
+                <div className="py-3 text-xs text-white/50 italic">No upcoming daily activities scheduled.</div>
+              ) : (
+                upcomingActivities.map((act) => (
+                  <div key={act.id} className="flex items-center justify-between py-1.5 border-b border-white/10">
+                    <span className="text-white/90 font-medium truncate max-w-[200px]">{act.name}</span>
+                    <span className="font-mono text-[11px] text-white/60 font-medium">
+                      {formatActivityTimeDisplay(act.startTime, act.endTime)}
+                    </span>
+                  </div>
+                ))
+              )}
             </div>
           </div>
 

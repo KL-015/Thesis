@@ -1,10 +1,13 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useFleet, selectActiveDuty } from '../../context/FleetContext';
 import { DailyActivity, DutyRosterItem } from '../../types';
 import {
   militaryTimeToMinutes,
   getCurrentMilitaryTime,
   toISODateString,
+  normalizeMilitaryTime,
+  sortDailyActivities,
+  getActiveDailyActivity,
 } from '../../utils/timeConflict';
 import { RotateCcw, ArrowRight, Plus, Edit2, Trash2, X, ShieldAlert } from 'lucide-react';
 
@@ -42,6 +45,19 @@ export interface StrengthRow {
   ts: number | string;
   tp: number | string;
   nya: number | string;
+}
+
+function parseStrengthNumber(value: unknown): number {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : 0;
+  }
+  if (typeof value === 'string') {
+    const cleaned = value.replace(/,/g, '').trim();
+    if (!cleaned) return 0;
+    const n = Number(cleaned);
+    return Number.isFinite(n) ? n : 0;
+  }
+  return 0;
 }
 
 const DEFAULT_STRENGTH_ROWS: StrengthRow[] = [
@@ -89,8 +105,24 @@ export const DailyActivitiesView: React.FC<{ onNavigateToCalendar: () => void }>
     updateStrengthRows,
   } = useFleet();
 
-  const currentMilitary = getCurrentMilitaryTime();
-  const todayStr = toISODateString(new Date());
+  const [now, setNow] = useState<Date>(() => new Date());
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setNow(new Date());
+    }, 10000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const currentMilitary = getCurrentMilitaryTime(now);
+  const currentMinutes = militaryTimeToMinutes(currentMilitary);
+  const todayStr = toISODateString(now);
+
+  const sortedActivities = useMemo(() => sortDailyActivities(dailyActivities), [dailyActivities]);
+  const activeActivity = useMemo(
+    () => getActiveDailyActivity(sortedActivities, currentMinutes),
+    [sortedActivities, currentMinutes]
+  );
 
   // Edit / Add Activity Modal state
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -264,34 +296,47 @@ export const DailyActivitiesView: React.FC<{ onNavigateToCalendar: () => void }>
     const cleanRows = editingRows.map((r) => ({
       ...r,
       batch: r.batch.trim() || 'BATCH',
-      ts: Number(r.ts) || 0,
-      tp: Number(r.tp) || 0,
-      nya: Number(r.nya) || 0,
+      ts: parseStrengthNumber(r.ts ?? (r as any).TS),
+      tp: parseStrengthNumber(r.tp ?? (r as any).TP),
+      nya: parseStrengthNumber(r.nya ?? (r as any).NYA),
     }));
     await updateStrengthRows(cleanRows, editingAsOf.trim());
     setIsStrengthModalOpen(false);
   };
 
   const totalTS = useMemo(
-    () => strengthRows.reduce((sum, r) => sum + (Number(r.ts) || 0), 0),
+    () => strengthRows.reduce((sum, r) => sum + parseStrengthNumber(r.ts ?? (r as any).TS), 0),
     [strengthRows]
   );
   const totalTP = useMemo(
-    () => strengthRows.reduce((sum, r) => sum + (Number(r.tp) || 0), 0),
+    () => strengthRows.reduce((sum, r) => sum + parseStrengthNumber(r.tp ?? (r as any).TP), 0),
     [strengthRows]
   );
   const totalNYA = useMemo(
-    () => strengthRows.reduce((sum, r) => sum + (Number(r.nya) || 0), 0),
+    () => strengthRows.reduce((sum, r) => sum + parseStrengthNumber(r.nya ?? (r as any).NYA), 0),
     [strengthRows]
   );
 
+  const editingTotalTS = useMemo(
+    () => editingRows.reduce((sum, r) => sum + parseStrengthNumber(r.ts ?? (r as any).TS), 0),
+    [editingRows]
+  );
+  const editingTotalTP = useMemo(
+    () => editingRows.reduce((sum, r) => sum + parseStrengthNumber(r.tp ?? (r as any).TP), 0),
+    [editingRows]
+  );
+  const editingTotalNYA = useMemo(
+    () => editingRows.reduce((sum, r) => sum + parseStrengthNumber(r.nya ?? (r as any).NYA), 0),
+    [editingRows]
+  );
+
   const formattedDate = useMemo(() => {
-    return new Date().toLocaleDateString('en-US', {
+    return now.toLocaleDateString('en-US', {
       month: 'long',
       day: 'numeric',
       year: 'numeric',
     }).toUpperCase();
-  }, []);
+  }, [now]);
 
   const todayCalendarEvents = useMemo(() => {
     return events.filter((e) => e.date === todayStr);
@@ -388,7 +433,7 @@ export const DailyActivitiesView: React.FC<{ onNavigateToCalendar: () => void }>
         {/* LEFT COLUMN: SCHEDULE & STANDING ORDERS (7 cols) */}
         <div className="lg:col-span-7 space-y-5">
           {/* Daily Activities Schedule Card */}
-          <div className="bg-white/12 backdrop-blur-2xl border border-white/25 rounded-3xl p-6 shadow-[0_15px_40px_rgba(0,0,0,0.2)] text-white">
+          <div className="bg-white/12 backdrop-blur-2xl border border-white/25 rounded-3xl p-4 sm:p-6 shadow-[0_15px_40px_rgba(0,0,0,0.2)] text-white">
           <div className="flex items-center justify-between mb-4 pb-3 border-b border-white/15">
             <div className="flex items-center gap-3">
               <h2 className="text-[1.1rem] font-bold text-white">Daily Activities</h2>
@@ -424,14 +469,14 @@ export const DailyActivitiesView: React.FC<{ onNavigateToCalendar: () => void }>
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/10">
-                {dailyActivities.length === 0 ? (
+                {sortedActivities.length === 0 ? (
                   <tr>
                     <td colSpan={isFleetOfficerOrAdmin ? 3 : 2} className="py-8 text-center text-xs text-white/50 italic">
                       No daily activities configured. Click &quot;Add Activity&quot; above to schedule.
                     </td>
                   </tr>
                 ) : (
-                  dailyActivities.map((act) => {
+                  sortedActivities.map((act) => {
                     const actStart = militaryTimeToMinutes(act.startTime);
                     const actEnd = militaryTimeToMinutes(act.endTime);
 
@@ -443,14 +488,24 @@ export const DailyActivitiesView: React.FC<{ onNavigateToCalendar: () => void }>
                     });
 
                     const isHighlighted = isMealOrMuster(act.name);
+                    const isActiveNow = activeActivity?.id === act.id;
 
                     return (
                       <tr
                         key={act.id}
-                        className="border-b border-white/10 hover:bg-white/10 transition-colors group"
+                        className={`border-b border-white/10 transition-colors group ${
+                          isActiveNow ? 'bg-blue-600/20 hover:bg-blue-600/25' : 'hover:bg-white/10'
+                        }`}
                       >
                         <td className="w-[100px] py-2.5 px-3 font-bold text-blue-300 font-mono text-sm align-middle whitespace-nowrap">
-                          {act.startTime}
+                          <div className="flex items-center gap-1.5">
+                            <span>{normalizeMilitaryTime(act.startTime)}</span>
+                            {isActiveNow && (
+                              <span className="text-[9px] font-sans font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded bg-blue-500 text-white shadow-sm">
+                                NOW
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td
                           className={`py-2.5 px-3 text-sm align-middle ${
@@ -678,12 +733,12 @@ export const DailyActivitiesView: React.FC<{ onNavigateToCalendar: () => void }>
             </div>
             <div
               onClick={isFleetOfficerOrAdmin ? openFleetModal : undefined}
-              className={`grid grid-cols-3 gap-2.5 mt-2.5 text-[0.85rem] ${
+              className={`grid grid-cols-1 sm:grid-cols-3 gap-2.5 mt-2.5 text-[0.85rem] ${
                 isFleetOfficerOrAdmin ? 'cursor-pointer' : ''
               }`}
             >
               {/* Column 1: CADET CANDIDATES */}
-              <div className="bg-white/10 p-2.5 rounded-2xl border border-white/15 min-h-[140px] flex flex-col hover:border-white/30 transition-colors backdrop-blur-md">
+              <div className="bg-white/10 p-2.5 rounded-2xl border border-white/15 min-h-[76px] sm:min-h-[140px] flex flex-col hover:border-white/30 transition-colors backdrop-blur-md">
                 <h4 className="text-[0.75rem] font-bold text-blue-200 border-b border-white/15 pb-1 mb-1.5 uppercase truncate tracking-wide">
                   {fleetData.section1.title}
                 </h4>
@@ -701,7 +756,7 @@ export const DailyActivitiesView: React.FC<{ onNavigateToCalendar: () => void }>
               </div>
 
               {/* Column 2: CADET TRAINER */}
-              <div className="bg-white/10 p-2.5 rounded-2xl border border-white/15 min-h-[140px] flex flex-col hover:border-white/30 transition-colors backdrop-blur-md">
+              <div className="bg-white/10 p-2.5 rounded-2xl border border-white/15 min-h-[76px] sm:min-h-[140px] flex flex-col hover:border-white/30 transition-colors backdrop-blur-md">
                 <h4 className="text-[0.75rem] font-bold text-blue-200 border-b border-white/15 pb-1 mb-1.5 uppercase truncate tracking-wide">
                   {fleetData.section2.title}
                 </h4>
@@ -713,7 +768,7 @@ export const DailyActivitiesView: React.FC<{ onNavigateToCalendar: () => void }>
               </div>
 
               {/* Column 3: SLDP */}
-              <div className="bg-white/10 p-2.5 rounded-2xl border border-white/15 min-h-[140px] flex flex-col hover:border-white/30 transition-colors backdrop-blur-md">
+              <div className="bg-white/10 p-2.5 rounded-2xl border border-white/15 min-h-[76px] sm:min-h-[140px] flex flex-col hover:border-white/30 transition-colors backdrop-blur-md">
                 <h4 className="text-[0.75rem] font-bold text-blue-200 border-b border-white/15 pb-1 mb-1.5 uppercase truncate tracking-wide">
                   {fleetData.section3.title}
                 </h4>
@@ -759,9 +814,15 @@ export const DailyActivitiesView: React.FC<{ onNavigateToCalendar: () => void }>
                 {strengthRows.map((row) => (
                   <tr key={row.id} className="hover:bg-white/5 transition-colors">
                     <td className="border border-white/20 p-2 text-left font-medium text-white/90">{row.batch}</td>
-                    <td className="border border-white/20 p-2 font-mono text-white">{row.ts}</td>
-                    <td className="border border-white/20 p-2 font-mono text-white">{row.tp}</td>
-                    <td className="border border-white/20 p-2 font-mono text-white">{row.nya}</td>
+                    <td className="border border-white/20 p-2 font-mono text-white">
+                      {parseStrengthNumber(row.ts ?? (row as any).TS)}
+                    </td>
+                    <td className="border border-white/20 p-2 font-mono text-white">
+                      {parseStrengthNumber(row.tp ?? (row as any).TP)}
+                    </td>
+                    <td className="border border-white/20 p-2 font-mono text-white">
+                      {parseStrengthNumber(row.nya ?? (row as any).NYA)}
+                    </td>
                   </tr>
                 ))}
                 <tr className="font-bold bg-white/15 text-white">
@@ -1287,7 +1348,7 @@ export const DailyActivitiesView: React.FC<{ onNavigateToCalendar: () => void }>
 
             <form onSubmit={handleSaveStrength} className="space-y-4 text-xs">
               <div className="space-y-3">
-                <div className="grid grid-cols-12 gap-2 text-[11px] font-bold text-white/70 uppercase px-1">
+                <div className="grid grid-cols-12 gap-1.5 sm:gap-2 text-[11px] font-bold text-white/70 uppercase px-1">
                   <div className="col-span-5">Batch / Category</div>
                   <div className="col-span-2 text-center">TS</div>
                   <div className="col-span-2 text-center">TP</div>
@@ -1298,7 +1359,7 @@ export const DailyActivitiesView: React.FC<{ onNavigateToCalendar: () => void }>
                 {editingRows.map((row, idx) => (
                   <div
                     key={row.id}
-                    className="grid grid-cols-12 gap-2 items-center bg-white/5 p-2 rounded-2xl border border-white/15"
+                    className="grid grid-cols-12 gap-1.5 sm:gap-2 items-center bg-white/5 p-2 rounded-2xl border border-white/15"
                   >
                     <div className="col-span-5">
                       <input
@@ -1307,7 +1368,7 @@ export const DailyActivitiesView: React.FC<{ onNavigateToCalendar: () => void }>
                         value={row.batch}
                         onChange={(e) => handleRowChange(idx, 'batch', e.target.value)}
                         placeholder="Batch name"
-                        className="w-full px-2.5 py-1.5 bg-white/10 border border-white/20 rounded-xl text-white font-medium focus:outline-none focus:border-blue-400 text-xs"
+                        className="w-full px-2 sm:px-2.5 py-1.5 bg-white/10 border border-white/20 rounded-xl text-white font-medium focus:outline-none focus:border-blue-400 text-xs"
                       />
                     </div>
                     <div className="col-span-2">
@@ -1316,7 +1377,7 @@ export const DailyActivitiesView: React.FC<{ onNavigateToCalendar: () => void }>
                         min="0"
                         value={row.ts}
                         onChange={(e) => handleRowChange(idx, 'ts', e.target.value)}
-                        className="w-full px-2 py-1.5 bg-white/10 border border-white/20 rounded-xl text-white font-mono text-center focus:outline-none focus:border-blue-400 text-xs"
+                        className="w-full px-1 sm:px-2 py-1.5 bg-white/10 border border-white/20 rounded-xl text-white font-mono text-center focus:outline-none focus:border-blue-400 text-xs"
                       />
                     </div>
                     <div className="col-span-2">
@@ -1325,7 +1386,7 @@ export const DailyActivitiesView: React.FC<{ onNavigateToCalendar: () => void }>
                         min="0"
                         value={row.tp}
                         onChange={(e) => handleRowChange(idx, 'tp', e.target.value)}
-                        className="w-full px-2 py-1.5 bg-white/10 border border-white/20 rounded-xl text-white font-mono text-center focus:outline-none focus:border-blue-400 text-xs"
+                        className="w-full px-1 sm:px-2 py-1.5 bg-white/10 border border-white/20 rounded-xl text-white font-mono text-center focus:outline-none focus:border-blue-400 text-xs"
                       />
                     </div>
                     <div className="col-span-2">
@@ -1334,7 +1395,7 @@ export const DailyActivitiesView: React.FC<{ onNavigateToCalendar: () => void }>
                         min="0"
                         value={row.nya}
                         onChange={(e) => handleRowChange(idx, 'nya', e.target.value)}
-                        className="w-full px-2 py-1.5 bg-white/10 border border-white/20 rounded-xl text-white font-mono text-center focus:outline-none focus:border-blue-400 text-xs"
+                        className="w-full px-1 sm:px-2 py-1.5 bg-white/10 border border-white/20 rounded-xl text-white font-mono text-center focus:outline-none focus:border-blue-400 text-xs"
                       />
                     </div>
                     <div className="col-span-1 text-center">
@@ -1351,6 +1412,15 @@ export const DailyActivitiesView: React.FC<{ onNavigateToCalendar: () => void }>
                     </div>
                   </div>
                 ))}
+
+                {/* Live Calculated Total Row */}
+                <div className="grid grid-cols-12 gap-2 items-center bg-white/15 px-3 py-2 rounded-2xl border border-white/25 font-bold text-white">
+                  <div className="col-span-5 text-xs uppercase tracking-wider">TOTAL</div>
+                  <div className="col-span-2 text-center font-mono text-xs">{editingTotalTS}</div>
+                  <div className="col-span-2 text-center font-mono text-xs">{editingTotalTP}</div>
+                  <div className="col-span-2 text-center font-mono text-xs">{editingTotalNYA}</div>
+                  <div className="col-span-1"></div>
+                </div>
               </div>
 
               <div className="flex items-center justify-between pt-1">

@@ -38,8 +38,9 @@ export const TopBar: React.FC<TopBarProps> = ({ onOpenLogin, onOpenAddUser }) =>
 
   useEffect(() => {
     const timer = setInterval(() => {
-      setMilitaryTime(getCurrentMilitaryTime());
-    }, 1000);
+      const next = getCurrentMilitaryTime();
+      setMilitaryTime((prev) => (prev === next ? prev : next));
+    }, 10000);
     return () => clearInterval(timer);
   }, []);
 
@@ -60,22 +61,22 @@ export const TopBar: React.FC<TopBarProps> = ({ onOpenLogin, onOpenAddUser }) =>
   };
 
   return (
-    <header className="sticky top-3 sm:top-4 z-40 max-w-6xl mx-auto px-3 sm:px-6 w-full text-white">
-      <div className="bg-white/12 backdrop-blur-2xl border border-white/25 rounded-3xl shadow-[0_15px_40px_rgba(0,0,0,0.25)] px-4 sm:px-7 h-16 flex items-center justify-between gap-4 transition-all duration-300">
+    <header className="sticky top-2 sm:top-4 z-40 max-w-6xl mx-auto px-3 sm:px-6 w-full text-white">
+      <div className="bg-white/12 backdrop-blur-2xl border border-white/25 rounded-3xl shadow-[0_15px_40px_rgba(0,0,0,0.25)] px-3.5 sm:px-7 h-14 sm:h-16 flex items-center justify-between gap-2 sm:gap-4 transition-all duration-300">
         {/* Brand */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5 min-w-0">
           <button
             onClick={() => handleNavClick('dashboard')}
-            className="flex items-center gap-3 text-left group cursor-pointer"
+            className="flex items-center gap-2.5 sm:gap-3 text-left group cursor-pointer min-w-0"
           >
-            <div className="w-9 h-9 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white shadow-[0_4px_14px_rgba(37,99,235,0.4)] border border-white/25 group-hover:scale-105 transition-transform duration-200">
-              <span className="text-base font-bold">⚓</span>
+            <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white shadow-[0_4px_14px_rgba(37,99,235,0.4)] border border-white/25 group-hover:scale-105 transition-transform duration-200 shrink-0">
+              <span className="text-sm sm:text-base font-bold">⚓</span>
             </div>
-            <div>
-              <span className="text-base font-bold text-white tracking-tight group-hover:text-blue-300 transition-colors">
+            <div className="min-w-0">
+              <span className="text-sm sm:text-base font-bold text-white tracking-tight group-hover:text-blue-300 transition-colors block truncate">
                 FleetSync
               </span>
-              <span className="block text-[11px] text-white/60 font-medium">
+              <span className="hidden sm:block text-[11px] text-white/60 font-medium">
                 Fleet Operations &amp; Scheduling
               </span>
             </div>
@@ -83,7 +84,7 @@ export const TopBar: React.FC<TopBarProps> = ({ onOpenLogin, onOpenAddUser }) =>
         </div>
 
         {/* Right Controls */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           {/* Live Military Time - Pill Glass */}
           <div className="hidden sm:flex items-center gap-1.5 text-xs font-mono px-3.5 py-1.5 bg-white/10 border border-white/20 rounded-full text-white shadow-2xs backdrop-blur-md">
             <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
@@ -102,15 +103,15 @@ export const TopBar: React.FC<TopBarProps> = ({ onOpenLogin, onOpenAddUser }) =>
 
           {/* User Account / Login State */}
           {currentUser ? (
-            <div className="flex items-center gap-2 pl-2 border-l border-white/20">
+            <div className="flex items-center gap-1.5 sm:gap-2 pl-1.5 sm:pl-2 border-l border-white/20">
               {isAdmin && onOpenAddUser && (
                 <button
                   onClick={onOpenAddUser}
-                  className="flex items-center gap-1.5 px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-full text-xs font-semibold shadow-[0_4px_12px_rgba(37,99,235,0.35)] border border-blue-400/30 transition-all cursor-pointer"
+                  className="flex items-center gap-1.5 px-2.5 sm:px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-full text-xs font-semibold shadow-[0_4px_12px_rgba(37,99,235,0.35)] border border-blue-400/30 transition-all cursor-pointer"
                   title="Add a new authorized officer (Title and Email)"
                 >
                   <UserPlus className="w-3.5 h-3.5" />
-                  <span>+ Add User</span>
+                  <span className="hidden sm:inline">+ Add User</span>
                 </button>
               )}
               <div className="hidden sm:block text-right">
@@ -133,7 +134,7 @@ export const TopBar: React.FC<TopBarProps> = ({ onOpenLogin, onOpenAddUser }) =>
           ) : (
             <button
               onClick={onOpenLogin}
-              className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-full transition-all duration-200 shadow-[0_4px_16px_rgba(37,99,235,0.45)] border border-blue-400/30 cursor-pointer"
+              className="flex items-center gap-1.5 px-3 sm:px-4 py-1.5 sm:py-2 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-full transition-all duration-200 shadow-[0_4px_16px_rgba(37,99,235,0.45)] border border-blue-400/30 cursor-pointer"
             >
               <LogIn className="w-3.5 h-3.5" />
               <span>Officer Login</span>
@@ -143,7 +144,7 @@ export const TopBar: React.FC<TopBarProps> = ({ onOpenLogin, onOpenAddUser }) =>
           {/* Mobile Menu Toggle */}
           <button
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className="lg:hidden p-2 text-white hover:text-white rounded-full bg-white/10 border border-white/20 shadow-2xs backdrop-blur-md cursor-pointer"
+            className="lg:hidden p-2 text-white hover:text-white rounded-full bg-white/10 border border-white/20 shadow-2xs cursor-pointer"
             aria-label="Toggle navigation"
           >
             {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
@@ -151,9 +152,9 @@ export const TopBar: React.FC<TopBarProps> = ({ onOpenLogin, onOpenAddUser }) =>
         </div>
       </div>
 
-      {/* Mobile Menu Dropdown - Glassmorphic Card */}
+      {/* Mobile Menu Dropdown - Lightweight Glass Card */}
       {mobileMenuOpen && (
-        <div className="lg:hidden mx-4 my-2 p-3 bg-slate-900/90 backdrop-blur-3xl rounded-3xl border border-white/20 shadow-2xl space-y-1 animate-in fade-in slide-in-from-top-2 duration-200 text-white">
+        <div className="lg:hidden mx-2 sm:mx-4 my-2 p-3 bg-slate-900/95 rounded-3xl border border-white/20 shadow-2xl space-y-1 text-white">
           {navLinks.map((item) => {
             const isActive = activePage === item.id;
             return (

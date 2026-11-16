@@ -26,8 +26,9 @@ const AppContent: React.FC = () => {
 
   return (
     <div className="min-h-screen text-white flex flex-col font-sans selection:bg-blue-500/30 selection:text-white relative">
-      {/* Background overlay for crisp readability and specular glass contrast */}
-      <div className="fixed inset-0 bg-slate-950/45 pointer-events-none -z-10 backdrop-blur-[2px]" />
+      {/* Fixed GPU-accelerated background image & subtle contrast overlay */}
+      <div className="app-bg-layer fixed inset-0 pointer-events-none -z-20" />
+      <div className="fixed inset-0 bg-slate-950/45 pointer-events-none -z-10" />
 
       {/* Top Header Bar */}
       <TopBar

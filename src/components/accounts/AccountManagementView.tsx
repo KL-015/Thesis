@@ -211,7 +211,8 @@ export const AccountManagementView: React.FC<{ onOpenLogin: () => void }> = ({ o
 
       {/* Rounded Glass Table */}
       <div className="rounded-3xl bg-white/12 backdrop-blur-2xl border border-white/25 shadow-[0_15px_40px_rgba(0,0,0,0.25)] overflow-hidden">
-        <table className="w-full text-left text-xs">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[600px] text-left text-xs">
           <thead>
             <tr className="border-b border-white/15 bg-black/25 text-white/70 font-mono text-[11px] uppercase tracking-wider">
               <th className="py-3.5 px-5 font-bold">Title &amp; Name</th>
@@ -308,7 +309,8 @@ export const AccountManagementView: React.FC<{ onOpenLogin: () => void }> = ({ o
               );
             })}
           </tbody>
-        </table>
+          </table>
+        </div>
       </div>
 
       {/* CREATE / EDIT ACCOUNT MODAL */}

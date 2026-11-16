@@ -136,3 +136,99 @@ export function toISODateString(date: Date = new Date()): string {
   const d = date.getDate().toString().padStart(2, '0');
   return `${y}-${m}-${d}`;
 }
+
+/**
+ * Sorts daily activities chronologically by start time.
+ */
+export function sortDailyActivities(activities: DailyActivity[]): DailyActivity[] {
+  return [...activities].sort((a, b) => {
+    const diff = militaryTimeToMinutes(a.startTime) - militaryTimeToMinutes(b.startTime);
+    if (diff !== 0) return diff;
+    return militaryTimeToMinutes(a.endTime) - militaryTimeToMinutes(b.endTime);
+  });
+}
+
+/**
+ * Formats an activity time or range cleanly (shows single time if start === end).
+ */
+export function formatActivityTimeDisplay(startTime: string, endTime?: string): string {
+  const normStart = normalizeMilitaryTime(startTime);
+  if (!endTime) return normStart;
+  const normEnd = normalizeMilitaryTime(endTime);
+  return normStart === normEnd ? normStart : `${normStart}–${normEnd}`;
+}
+
+/**
+ * Resolves the currently active Daily Activity aligned with the Daily Activities table.
+ * Handles both explicit time ranges (e.g. 0700H–0800H) and single-timestamp milestones
+ * (e.g. 1900H STUDYCALL until 2100H, or 2200H LIGHTS OFF through midnight until 0400H).
+ */
+export function getActiveDailyActivity(
+  activities: DailyActivity[],
+  currentMinutes: number
+): DailyActivity | undefined {
+  const sorted = sortDailyActivities(activities);
+  if (sorted.length === 0) return undefined;
+
+  const firstStart = militaryTimeToMinutes(sorted[0].startTime);
+  let active: DailyActivity | undefined;
+
+  for (let i = 0; i < sorted.length; i++) {
+    const act = sorted[i];
+    const start = militaryTimeToMinutes(act.startTime);
+    const explicitEnd = militaryTimeToMinutes(act.endTime);
+
+    let matches = false;
+    if (explicitEnd > start) {
+      matches = currentMinutes >= start && currentMinutes < explicitEnd;
+    } else if (explicitEnd < start) {
+      // Explicit overnight range
+      matches = currentMinutes >= start || currentMinutes < explicitEnd;
+    } else {
+      // Point-in-time routine marker (start === end): active until next strictly later activity starts
+      let nextStart: number | null = null;
+      for (let j = i + 1; j < sorted.length; j++) {
+        const candidateStart = militaryTimeToMinutes(sorted[j].startTime);
+        if (candidateStart > start) {
+          nextStart = candidateStart;
+          break;
+        }
+      }
+      if (nextStart !== null) {
+        matches = currentMinutes >= start && currentMinutes < nextStart;
+      } else {
+        // Last milestone of the day wraps past midnight until the first morning routine
+        matches = currentMinutes >= start || currentMinutes < firstStart;
+      }
+    }
+
+    if (matches) {
+      active = act;
+    }
+  }
+
+  return active;
+}
+
+/**
+ * Returns the next upcoming Daily Activities after the current time (wrapping around the day if needed).
+ */
+export function getUpcomingDailyActivities(
+  activities: DailyActivity[],
+  currentMinutes: number,
+  count: number = 4
+): DailyActivity[] {
+  const sorted = sortDailyActivities(activities);
+  if (sorted.length === 0) return [];
+
+  const active = getActiveDailyActivity(sorted, currentMinutes);
+  const laterToday = sorted.filter(
+    (act) => militaryTimeToMinutes(act.startTime) > currentMinutes && act.id !== active?.id
+  );
+  const earlierWrap = sorted.filter(
+    (act) => militaryTimeToMinutes(act.startTime) <= currentMinutes && act.id !== active?.id
+  );
+
+  return [...laterToday, ...earlierWrap].slice(0, count);
+}
+
