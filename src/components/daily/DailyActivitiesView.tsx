@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { useFleet } from '../../context/FleetContext';
+import { useFleet, selectActiveDuty } from '../../context/FleetContext';
 import { DailyActivity, DutyRosterItem } from '../../types';
 import {
   militaryTimeToMinutes,
@@ -7,7 +7,6 @@ import {
   toISODateString,
 } from '../../utils/timeConflict';
 import { RotateCcw, ArrowRight, Plus, Edit2, Trash2, X, ShieldAlert } from 'lucide-react';
-import { apiGet, apiPost } from '../../lib/supabase';
 
 interface FleetSection {
   title: string;
@@ -76,6 +75,7 @@ export const DailyActivitiesView: React.FC<{ onNavigateToCalendar: () => void }>
     simulateDailyReset,
     events,
     canEditDailyActivities: isFleetOfficerOrAdmin,
+    canEditDuties,
     dutyRoster,
     updateDutyItem,
     standingOrders,
@@ -100,20 +100,7 @@ export const DailyActivitiesView: React.FC<{ onNavigateToCalendar: () => void }>
   const [endTimeInput, setEndTimeInput] = useState('');
   const [locationInput, setLocationInput] = useState('');
 
-  const currentDuty: DutyRosterItem = dutyRoster.find((d) => d.date === todayStr) || dutyRoster[0] || {
-    id: `dty-${todayStr}`,
-    date: todayStr,
-    fod: '',
-    coow: '',
-    acoow1: '',
-    acoow2: '',
-    acwo: '',
-    moow: '',
-    amoow1: '',
-    amoow2: '',
-    station: 'Quarterdeck Main Desk',
-    status: 'ON_WATCH',
-  };
+  const currentDuty: DutyRosterItem = selectActiveDuty(dutyRoster);
 
   // Duty Personnel Edit Modal state
   const [isDutyModalOpen, setIsDutyModalOpen] = useState(false);
@@ -566,7 +553,7 @@ export const DailyActivitiesView: React.FC<{ onNavigateToCalendar: () => void }>
               <h3 className="text-[1rem] font-bold text-white">
                 Duty Personnel
               </h3>
-              {isFleetOfficerOrAdmin && (
+              {canEditDuties && (
                 <button
                   onClick={openDutyModal}
                   className="p-1.5 text-white/70 hover:text-white rounded-lg hover:bg-white/15 flex items-center gap-1 text-xs font-semibold cursor-pointer transition-colors"

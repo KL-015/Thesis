@@ -155,7 +155,7 @@ export const AccountManagementView: React.FC<{ onOpenLogin: () => void }> = ({ o
     const cleanUsername = username.trim() || cleanEmail.split('@')[0].replace(/[^a-z0-9_-]/g, '_');
 
     if (editingUser) {
-      updateUserAccount(editingUser.id, {
+      await updateUserAccount(editingUser.id, {
         title: cleanTitle,
         rank: cleanTitle,
         email: cleanEmail,

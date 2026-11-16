@@ -36,28 +36,45 @@ const AppContent: React.FC = () => {
       />
 
       {/* Floating Glass Notification */}
-      {resetNotification && (
-        <div className="max-w-6xl mx-auto px-4 mt-4 w-full">
-          <div className="bg-gradient-to-r from-emerald-600/90 via-blue-600/90 to-blue-700/95 backdrop-blur-2xl border border-emerald-400/50 rounded-2xl px-5 py-3.5 text-xs text-white flex items-center justify-between gap-3 shadow-[0_10px_35px_rgba(16,185,129,0.35)] animate-in fade-in slide-in-from-top-2 duration-300">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-xl bg-white/20 text-white flex items-center justify-center shrink-0 border border-white/30 shadow-inner">
-                <CheckCircle2 className="w-4 h-4 text-emerald-300" />
-              </div>
-              <div>
-                <span className="font-bold text-white text-xs block leading-tight">Database Sync Complete</span>
-                <span className="text-[11px] text-emerald-100 font-medium">{resetNotification}</span>
-              </div>
-            </div>
-            <button
-              onClick={clearResetNotification}
-              className="text-white/80 hover:text-white p-1.5 rounded-full hover:bg-white/20 transition-colors cursor-pointer shrink-0"
-              title="Dismiss"
+      {resetNotification && (() => {
+        const isError = resetNotification.startsWith('✗');
+        return (
+          <div className="max-w-6xl mx-auto px-4 mt-4 w-full">
+            <div
+              className={`backdrop-blur-2xl rounded-2xl px-5 py-3.5 text-xs text-white flex items-center justify-between gap-3 animate-in fade-in slide-in-from-top-2 duration-300 ${
+                isError
+                  ? 'bg-gradient-to-r from-red-600/90 via-rose-600/90 to-red-700/95 border border-red-400/50 shadow-[0_10px_35px_rgba(239,68,68,0.35)]'
+                  : 'bg-gradient-to-r from-emerald-600/90 via-blue-600/90 to-blue-700/95 border border-emerald-400/50 shadow-[0_10px_35px_rgba(16,185,129,0.35)]'
+              }`}
             >
-              <X className="w-4 h-4" />
-            </button>
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-xl bg-white/20 text-white flex items-center justify-center shrink-0 border border-white/30 shadow-inner">
+                  {isError ? (
+                    <X className="w-4 h-4 text-red-200" />
+                  ) : (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-300" />
+                  )}
+                </div>
+                <div>
+                  <span className="font-bold text-white text-xs block leading-tight">
+                    {isError ? 'Database Sync Error' : 'Database Sync Complete'}
+                  </span>
+                  <span className={`text-[11px] font-medium ${isError ? 'text-red-100' : 'text-emerald-100'}`}>
+                    {resetNotification}
+                  </span>
+                </div>
+              </div>
+              <button
+                onClick={clearResetNotification}
+                className="text-white/80 hover:text-white p-1.5 rounded-full hover:bg-white/20 transition-colors cursor-pointer shrink-0"
+                title="Dismiss"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Dynamic Flex Wrapper putting SidebarNav directly adjacent to cards */}
       <div className="max-w-6xl w-full mx-auto px-3 sm:px-6 py-6 flex items-start gap-3 sm:gap-4 flex-1">

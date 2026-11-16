@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import {
   UserAccount,
   UserRole,
@@ -89,9 +89,9 @@ interface FleetContextType {
   // Memo Repository & Groups
   memoGroups: MemoGroup[];
   memos: Memorandum[];
-  createMemoGroup: (name: string, description?: string) => boolean;
-  updateMemoGroup: (id: string, name: string, description?: string) => void;
-  deleteMemoGroup: (id: string) => void;
+  createMemoGroup: (name: string, description?: string) => Promise<boolean>;
+  updateMemoGroup: (id: string, name: string, description?: string) => Promise<void>;
+  deleteMemoGroup: (id: string) => Promise<void>;
   uploadMemorandum: (
     memo: Omit<Memorandum, 'id' | 'uploadDate' | 'uploadedBy' | 'uploadedByName'>,
     fileBlob?: File | Blob
@@ -184,8 +184,32 @@ function saveToStorage<T>(key: string, value: T): void {
   }
 }
 
+export function selectActiveDuty(dutyRoster: DutyRosterItem[]): DutyRosterItem {
+  const todayStr = toISODateString(new Date());
+  return (
+    dutyRoster.find((d) => d.date === todayStr) ||
+    dutyRoster.find((d) => d.status === 'ON_WATCH') ||
+    dutyRoster[0] || {
+      id: 'dty-01',
+      date: todayStr,
+      fod: '',
+      coow: '',
+      acoow1: '',
+      acoow2: '',
+      acwo: '',
+      moow: '',
+      amoow1: '',
+      amoow2: '',
+      station: 'Quarterdeck Main Desk',
+      status: 'ON_WATCH',
+    }
+  );
+}
+
 export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [activePage, setActivePage] = useState<AppPage>('dashboard');
+  const mutationEpochRef = useRef(0);
+  const notificationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // User auth state: default null (Normal Cadet)
   const [currentUser, setCurrentUser] = useState<UserAccount | null>(() => {
@@ -203,7 +227,6 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const [users, setUsers] = useState<UserAccount[]>(() => {
     const loaded = loadFromStorage<UserAccount[]>('users', INITIAL_USERS);
-    // Remove old mock users
     const cleaned = loaded.filter((u) => u.role === 'admin' || !['usr-2', 'usr-3', 'usr-4'].includes(u.id));
     return cleaned.map((u) => {
       const match = INITIAL_USERS.find(
@@ -213,9 +236,9 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return {
         ...u,
         fullName: isNavarro ? 'Administrator' : u.fullName,
-        rank: isNavarro ? 'Administrator' : (u.rank || u.title || 'Officer On Watch'),
+        rank: isNavarro ? 'Administrator' : u.rank || u.title || 'Officer On Watch',
         email: u.email || match?.email || `${u.username.toLowerCase()}@fleet.ops`,
-        title: isNavarro ? 'Administrator' : (u.title || match?.title || u.rank || 'Officer On Watch'),
+        title: isNavarro ? 'Administrator' : u.title || match?.title || u.rank || 'Officer On Watch',
       };
     });
   });
@@ -315,9 +338,15 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const showSyncNotification = (msg: string) => {
     setResetNotification(msg);
+    if (notificationTimerRef.current) {
+      clearTimeout(notificationTimerRef.current);
+    }
+    notificationTimerRef.current = setTimeout(() => {
+      setResetNotification(null);
+    }, 6000);
   };
 
-  // Sync state to storage
+  // Sync state to local storage cache
   useEffect(() => {
     saveToStorage('current_user', currentUser);
   }, [currentUser]);
@@ -358,22 +387,43 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     saveToStorage('last_reset_date', lastResetDate);
   }, [lastResetDate]);
 
-  // Automated midnight check
+  useEffect(() => {
+    saveToStorage('standing_orders', standingOrders);
+  }, [standingOrders]);
+
+  useEffect(() => {
+    saveToStorage('uniform_requirements', uniformData);
+  }, [uniformData]);
+
+  useEffect(() => {
+    saveToStorage('fleet_roster', fleetData);
+  }, [fleetData]);
+
+  useEffect(() => {
+    saveToStorage('total_strength', strengthRows);
+  }, [strengthRows]);
+
+  useEffect(() => {
+    saveToStorage('strength_as_of', strengthAsOf);
+  }, [strengthAsOf]);
+
+  // Automated date rollover marker (do not overwrite Supabase-synced state)
   useEffect(() => {
     const today = toISODateString(new Date());
     if (lastResetDate !== today) {
-      simulateDailyReset();
+      setLastResetDate(today);
+      resetMusterRoll();
     }
   }, []);
 
-  // Fetch real memos from server proxy API
+  // Fetch authoritative data from server proxy API & poll every 3 seconds
   useEffect(() => {
     let isMounted = true;
-    const fetchSupabaseMemos = async () => {
+
+    const fetchSupabaseMemos = async (startEpoch: number) => {
       try {
         const { data, error } = await apiGet<any[]>('memos');
-
-        if (!error && data && data.length > 0 && isMounted) {
+        if (!error && Array.isArray(data) && isMounted && mutationEpochRef.current === startEpoch) {
           const loaded: Memorandum[] = data.map((row: any) => ({
             id: row.id,
             title: row.title,
@@ -391,24 +441,17 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             signatory: row.signatory,
             isPublicToCadets: row.is_public_to_cadets ?? true,
           }));
-          setMemos((prev) => {
-            const dynamicNonMock = prev.filter((m) => !m.id.startsWith('memo-0'));
-            const existingIds = new Set(loaded.map((m) => m.id));
-            const extra = dynamicNonMock.filter((m) => !existingIds.has(m.id));
-            return [...loaded, ...extra];
-          });
+          setMemos(loaded);
         }
       } catch (err) {
-        console.warn('Memos initial fetch notice:', err);
+        console.warn('Memos fetch notice:', err);
       }
     };
 
-    // Fetch real officers from server proxy API
-    const fetchSupabaseOfficers = async () => {
+    const fetchSupabaseOfficers = async (startEpoch: number) => {
       try {
         const { data, error } = await apiGet<any[]>('officers');
-
-        if (!error && data && data.length > 0 && isMounted) {
+        if (!error && Array.isArray(data) && isMounted && mutationEpochRef.current === startEpoch) {
           const loaded: UserAccount[] = data.map((row: any) => ({
             id: row.id || `usr-${row.email}`,
             username: row.username || (row.email ? row.email.split('@')[0] : `user_${Date.now()}`),
@@ -422,29 +465,43 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             permissions: row.permissions || undefined,
           }));
 
-          setUsers((prev) => {
-            const map = new Map<string, UserAccount>();
-            for (const u of prev) {
-              if (u.email) map.set(u.email.toLowerCase(), u);
-              else map.set(u.username.toLowerCase(), u);
+          // Authoritative merge: always preserve built-in Admin fallback unless overridden by DB
+          const map = new Map<string, UserAccount>();
+          for (const initUser of INITIAL_USERS) {
+            const key = (initUser.email || initUser.username).toLowerCase();
+            map.set(key, initUser);
+          }
+          for (const o of loaded) {
+            const key = (o.email || o.username).toLowerCase();
+            const existing = map.get(key);
+            map.set(key, existing?.password ? { ...o, password: existing.password } : o);
+          }
+          const nextUsers = Array.from(map.values());
+          setUsers(nextUsers);
+
+          // Sync logged-in user if their DB record changed
+          setCurrentUser((prevCurrent) => {
+            if (!prevCurrent) return null;
+            const matched = nextUsers.find(
+              (u) =>
+                u.id === prevCurrent.id ||
+                (u.email && prevCurrent.email && u.email.toLowerCase() === prevCurrent.email.toLowerCase())
+            );
+            if (!matched || !matched.isActive) {
+              return prevCurrent.role === 'admin' ? prevCurrent : null;
             }
-            for (const o of loaded) {
-              if (o.email) map.set(o.email.toLowerCase(), o);
-              else map.set(o.username.toLowerCase(), o);
-            }
-            return Array.from(map.values());
+            return { ...matched, password: prevCurrent.password || matched.password };
           });
         }
       } catch (err) {
-        console.warn('Officers initial fetch notice:', err);
+        console.warn('Officers fetch notice:', err);
       }
     };
 
-    // Fetch real events from server proxy API
-    const fetchSupabaseEvents = async () => {
+    const fetchSupabaseEvents = async (startEpoch: number) => {
       try {
         const { data, error } = await apiGet<any[]>('events');
-        if (!error && Array.isArray(data) && isMounted) {
+        if (!error && Array.isArray(data) && isMounted && mutationEpochRef.current === startEpoch) {
           const loaded: FleetEvent[] = data.map((row: any) => ({
             id: row.id,
             name: row.name,
@@ -460,15 +517,14 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           setEvents(loaded);
         }
       } catch (err) {
-        console.warn('Events initial fetch notice:', err);
+        console.warn('Events fetch notice:', err);
       }
     };
 
-    // Fetch real announcements from server proxy API
-    const fetchSupabaseAnnouncements = async () => {
+    const fetchSupabaseAnnouncements = async (startEpoch: number) => {
       try {
         const { data, error } = await apiGet<any[]>('announcements');
-        if (!error && Array.isArray(data) && isMounted) {
+        if (!error && Array.isArray(data) && isMounted && mutationEpochRef.current === startEpoch) {
           const loaded: Announcement[] = data.map((row: any) => ({
             id: row.id,
             title: row.title,
@@ -484,15 +540,14 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           setAnnouncements(loaded);
         }
       } catch (err) {
-        console.warn('Announcements initial fetch notice:', err);
+        console.warn('Announcements fetch notice:', err);
       }
     };
 
-    // Fetch real duty roster from server proxy API
-    const fetchSupabaseDuties = async () => {
+    const fetchSupabaseDuties = async (startEpoch: number) => {
       try {
         const { data, error } = await apiGet<any[]>('duties');
-        if (!error && Array.isArray(data) && data.length > 0 && isMounted) {
+        if (!error && Array.isArray(data) && data.length > 0 && isMounted && mutationEpochRef.current === startEpoch) {
           const loaded: DutyRosterItem[] = data.map((row: any) => ({
             id: row.id,
             date: row.date,
@@ -510,15 +565,14 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           setDutyRoster(loaded);
         }
       } catch (err) {
-        console.warn('Duties initial fetch notice:', err);
+        console.warn('Duties fetch notice:', err);
       }
     };
 
-    // Fetch real daily activities from server proxy API
-    const fetchSupabaseDailyActivities = async () => {
+    const fetchSupabaseDailyActivities = async (startEpoch: number) => {
       try {
         const { data, error } = await apiGet<any[]>('daily-activities');
-        if (!error && data && data.length > 0 && isMounted) {
+        if (!error && Array.isArray(data) && isMounted && mutationEpochRef.current === startEpoch) {
           const loaded: DailyActivity[] = data
             .map((row: any) => ({
               id: row.id,
@@ -535,14 +589,14 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           setDailyActivities(loaded);
         }
       } catch (err) {
-        console.warn('Daily activities initial fetch notice:', err);
+        console.warn('Daily activities fetch notice:', err);
       }
     };
 
-    const fetchSupabaseStandingOrders = async () => {
+    const fetchSupabaseStandingOrders = async (startEpoch: number) => {
       try {
         const { data, error } = await apiGet<any[]>('standing-orders');
-        if (!error && Array.isArray(data) && data.length > 0 && isMounted) {
+        if (!error && Array.isArray(data) && isMounted && mutationEpochRef.current === startEpoch) {
           setStandingOrders(data.map((r: any) => r.order_text));
         }
       } catch (err) {
@@ -550,10 +604,10 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
     };
 
-    const fetchSupabaseBoardMeta = async () => {
+    const fetchSupabaseBoardMeta = async (startEpoch: number) => {
       try {
         const { data, error } = await apiGet<any[]>('board-meta');
-        if (!error && Array.isArray(data) && data.length > 0 && isMounted) {
+        if (!error && Array.isArray(data) && isMounted && mutationEpochRef.current === startEpoch) {
           for (const item of data) {
             if (item.key === 'uniforms' && item.value) {
               setUniformData(item.value);
@@ -562,6 +616,8 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             } else if (item.key === 'total_strength' && item.value) {
               if (item.value.rows) setStrengthRows(item.value.rows);
               if (item.value.asOf) setStrengthAsOf(item.value.asOf);
+            } else if (item.key === 'memo_groups' && Array.isArray(item.value)) {
+              setMemoGroups(item.value);
             }
           }
         }
@@ -572,14 +628,15 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     const fetchAllData = () => {
       if (!isMounted) return;
-      fetchSupabaseMemos();
-      fetchSupabaseOfficers();
-      fetchSupabaseEvents();
-      fetchSupabaseAnnouncements();
-      fetchSupabaseDuties();
-      fetchSupabaseDailyActivities();
-      fetchSupabaseStandingOrders();
-      fetchSupabaseBoardMeta();
+      const startEpoch = mutationEpochRef.current;
+      fetchSupabaseMemos(startEpoch);
+      fetchSupabaseOfficers(startEpoch);
+      fetchSupabaseEvents(startEpoch);
+      fetchSupabaseAnnouncements(startEpoch);
+      fetchSupabaseDuties(startEpoch);
+      fetchSupabaseDailyActivities(startEpoch);
+      fetchSupabaseStandingOrders(startEpoch);
+      fetchSupabaseBoardMeta(startEpoch);
     };
 
     fetchAllData();
@@ -593,10 +650,8 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     };
   }, []);
 
-  // Permissions helpers: anyone with an account can edit, upload, and manage based on permissions
+  // Permissions helpers
   const isAdmin = currentUser?.role === 'admin';
-  const isFleetOfficer = !!currentUser;
-
   const canAddCalendarEvents = isAdmin || (currentUser ? currentUser.permissions?.canAddCalendarEvents !== false : false);
   const canUploadMemos = isAdmin || (currentUser ? currentUser.permissions?.canUploadMemos !== false : false);
   const canPostAnnouncements = isAdmin || (currentUser ? currentUser.permissions?.canPostAnnouncements !== false : false);
@@ -607,7 +662,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const isFleetOfficerOrAdmin = !!currentUser;
   const hasSchedulingPermission = canAddCalendarEvents;
 
-  // Login handler: supports email-only sign in for officers, and username/password for admin
+  // Login handler
   const login = (
     identifier: string,
     password?: string
@@ -630,14 +685,11 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       };
     }
 
-    // Admin login verification: check password if password provided or required
     if (found.role === 'admin') {
       if (password && password.trim() && found.password && found.password !== password.trim()) {
         return { success: false, error: 'Incorrect administrator password.' };
       }
     } else {
-      // Officer login: officers can log in with just their recognized email!
-      // If a password was explicitly entered and the account has a password, verify it
       if (password && password.trim() && found.password && found.password !== password.trim()) {
         return { success: false, error: 'Incorrect password.' };
       }
@@ -654,7 +706,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   };
 
-  // User management (Admin only) - allows adding with Title and Email and saves to Supabase
+  // User management (Admin only)
   const createUserAccount = async (
     user: Omit<UserAccount, 'id' | 'createdAt'>
   ): Promise<{ success: boolean; error?: string; supabaseSaved?: boolean }> => {
@@ -667,9 +719,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return { success: false, error: 'Email address is required.' };
     }
 
-    const emailExists = users.some(
-      (u) => u.email?.trim().toLowerCase() === cleanEmail
-    );
+    const emailExists = users.some((u) => u.email?.trim().toLowerCase() === cleanEmail);
     if (emailExists) {
       return { success: false, error: `Email "${user.email}" is already registered in the system.` };
     }
@@ -677,9 +727,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const rawUsername = user.username?.trim() || cleanEmail.split('@')[0] || `officer_${Date.now()}`;
     const cleanUsername = rawUsername.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
 
-    const usernameExists = users.some(
-      (u) => u.username.toLowerCase() === cleanUsername
-    );
+    const usernameExists = users.some((u) => u.username.toLowerCase() === cleanUsername);
     if (usernameExists) {
       return { success: false, error: `Username "${cleanUsername}" is already taken.` };
     }
@@ -692,19 +740,18 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       ...user,
       id: `usr-${Date.now()}`,
       username: cleanUsername,
-      email: user.email?.trim(),
-      title: title,
+      email: cleanEmail,
+      title,
       rank: user.rank?.trim() || title,
-      fullName: fullName,
+      fullName,
       role: user.role || 'fleet_officer',
       createdAt: toISODateString(new Date()),
       isActive: true,
     };
 
+    mutationEpochRef.current += 1;
+    const previousUsers = users;
     setUsers((prev) => [...prev, newUser]);
-
-    let supabaseSaved = false;
-    let supabaseError: string | undefined;
 
     try {
       const res = await apiPost('officers', {
@@ -719,24 +766,29 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         permissions: newUser.permissions,
       });
 
-      if (!res.error) {
-        supabaseSaved = true;
-      } else {
-        supabaseError = res.error;
-        console.warn('Officers insert notice:', res.error);
+      if (res.error) {
+        setUsers(previousUsers);
+        showSyncNotification(`✗ Failed to save officer account: ${res.error}`);
+        return { success: false, supabaseSaved: false, error: res.error };
       }
-    } catch (err: any) {
-      supabaseError = err?.message || 'Failed to save officer';
-      console.warn('Officers insert exception:', err);
-    }
 
-    return { success: true, supabaseSaved, error: supabaseError };
+      showSyncNotification('✓ Officer account saved & synced to Database!');
+      return { success: true, supabaseSaved: true };
+    } catch (err: any) {
+      const msg = err?.message || 'Failed to save officer';
+      setUsers(previousUsers);
+      showSyncNotification(`✗ Failed to save officer account: ${msg}`);
+      return { success: false, supabaseSaved: false, error: msg };
+    }
   };
 
   const updateUserAccount = async (id: string, partial: Partial<UserAccount>) => {
     if (!isAdmin) return;
+    mutationEpochRef.current += 1;
     const previousUsers = users;
     const previousCurrentUser = currentUser;
+    const mergedUser = users.find((u) => u.id === id);
+
     setUsers((prev) => prev.map((u) => (u.id === id ? { ...u, ...partial } : u)));
     if (currentUser?.id === id) {
       setCurrentUser((prev) => (prev ? { ...prev, ...partial } : null));
@@ -745,7 +797,6 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     try {
       const updateData: Record<string, any> = {};
       if (partial.title !== undefined) updateData.title = partial.title;
-      if (partial.rank !== undefined) updateData.rank = partial.rank;
       if (partial.email !== undefined) updateData.email = partial.email;
       if (partial.fullName !== undefined) updateData.full_name = partial.fullName;
       if (partial.role !== undefined) updateData.role = partial.role;
@@ -755,8 +806,26 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (Object.keys(updateData).length > 0) {
         const res = await apiPut(`officers/${id}`, updateData);
         if (res.error) {
+          // If built-in admin row isn't in DB yet, create it cleanly
+          if (mergedUser && /not found/i.test(res.error)) {
+            const createRes = await apiPost('officers', {
+              id: mergedUser.id,
+              email: partial.email ?? mergedUser.email,
+              title: partial.title ?? mergedUser.title,
+              full_name: partial.fullName ?? mergedUser.fullName,
+              username: mergedUser.username,
+              role: partial.role ?? mergedUser.role,
+              is_active: partial.isActive ?? mergedUser.isActive,
+              permissions: partial.permissions ?? mergedUser.permissions,
+              created_at: new Date().toISOString(),
+            });
+            if (!createRes.error) {
+              showSyncNotification('✓ User account updated & synced!');
+              return;
+            }
+          }
           console.error('Update user account error:', res.error);
-          showSyncNotification('✗ Failed to sync user account update');
+          showSyncNotification(`✗ Failed to sync user account update: ${res.error}`);
           setUsers(previousUsers);
           if (previousCurrentUser?.id === id) {
             setCurrentUser(previousCurrentUser);
@@ -765,9 +834,9 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           showSyncNotification('✓ User account updated & synced!');
         }
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('Update user account exception:', e);
-      showSyncNotification('✗ Failed to sync user account update');
+      showSyncNotification(`✗ Failed to sync user account update: ${e?.message || e}`);
       setUsers(previousUsers);
       if (previousCurrentUser?.id === id) {
         setCurrentUser(previousCurrentUser);
@@ -777,6 +846,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const deleteUserAccount = async (id: string) => {
     if (!isAdmin) return;
+    mutationEpochRef.current += 1;
     const previousUsers = users;
     const previousCurrentUser = currentUser;
     setUsers((prev) => prev.filter((u) => u.id !== id));
@@ -788,7 +858,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const res = await apiDelete(`officers/${id}`);
       if (res.error) {
         console.error('Delete user account error:', res.error);
-        showSyncNotification('✗ Failed to delete user account from database');
+        showSyncNotification(`✗ Failed to delete user account: ${res.error}`);
         setUsers(previousUsers);
         if (previousCurrentUser?.id === id) {
           setCurrentUser(previousCurrentUser);
@@ -796,9 +866,9 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       } else {
         showSyncNotification('✓ User account removed from database!');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Delete user account exception:', err);
-      showSyncNotification('✗ Failed to delete user account from database');
+      showSyncNotification(`✗ Failed to delete user account: ${err?.message || err}`);
       setUsers(previousUsers);
       if (previousCurrentUser?.id === id) {
         setCurrentUser(previousCurrentUser);
@@ -816,7 +886,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return evaluateEventConflicts(target, events, dailyActivities);
   };
 
-  // Add fleet event with conflict evaluation
+  // Add fleet event
   const addFleetEvent = async (
     event: Omit<FleetEvent, 'id' | 'createdAt' | 'createdBy' | 'createdByName'>
   ) => {
@@ -848,6 +918,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       overlappingActivityNames: conflictResult.dailyConflicts.map((d) => `${d.name} (${d.startTime}–${d.endTime})`),
     };
 
+    mutationEpochRef.current += 1;
     setEvents((prev) => [...prev, newEvent]);
 
     try {
@@ -865,26 +936,23 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       });
       if (res.error) {
         console.error('Events insert error:', res.error);
-        showSyncNotification('✗ Failed to sync event to database');
+        showSyncNotification(`✗ Failed to sync event to database: ${res.error}`);
         setEvents((prev) => prev.filter((e) => e.id !== newEvent.id));
-      } else {
-        showSyncNotification('✓ Fleet Calendar Event saved & synced live!');
+        return { success: false, conflictResult };
       }
-    } catch (e) {
+      showSyncNotification('✓ Fleet Calendar Event saved & synced live!');
+      return { success: true, conflictResult, createdId: newId };
+    } catch (e: any) {
       console.error('Events insert exception:', e);
-      showSyncNotification('✗ Failed to sync event to database');
+      showSyncNotification(`✗ Failed to sync event to database: ${e?.message || e}`);
       setEvents((prev) => prev.filter((e) => e.id !== newEvent.id));
+      return { success: false, conflictResult };
     }
-
-    return {
-      success: true,
-      conflictResult,
-      createdId: newId,
-    };
   };
 
   const updateFleetEvent = async (id: string, partial: Partial<FleetEvent>) => {
     if (!hasSchedulingPermission) return;
+    mutationEpochRef.current += 1;
     const previousEvents = events;
     setEvents((prev) =>
       prev.map((e) => {
@@ -916,21 +984,22 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const res = await apiPut(`events/${id}`, updateObj);
         if (res.error) {
           console.error('Events update error:', res.error);
-          showSyncNotification('✗ Failed to sync event update');
+          showSyncNotification(`✗ Failed to sync event update: ${res.error}`);
           setEvents(previousEvents);
         } else {
           showSyncNotification('✓ Fleet Event updated & synced to Database!');
         }
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('Events update exception:', e);
-      showSyncNotification('✗ Failed to sync event update');
+      showSyncNotification(`✗ Failed to sync event update: ${e?.message || e}`);
       setEvents(previousEvents);
     }
   };
 
   const deleteFleetEvent = async (id: string) => {
     if (!hasSchedulingPermission) return;
+    mutationEpochRef.current += 1;
     const previousEvents = events;
     setEvents((prev) => prev.filter((e) => e.id !== id));
 
@@ -938,20 +1007,21 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const res = await apiDelete(`events/${id}`);
       if (res.error) {
         console.error('Events delete error:', res.error);
-        showSyncNotification('✗ Failed to delete event from database');
+        showSyncNotification(`✗ Failed to delete event from database: ${res.error}`);
         setEvents(previousEvents);
       } else {
         showSyncNotification('✓ Fleet Event removed from Database!');
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('Events delete exception:', e);
-      showSyncNotification('✗ Failed to delete event from database');
+      showSyncNotification(`✗ Failed to delete event from database: ${e?.message || e}`);
       setEvents(previousEvents);
     }
   };
 
   const addDailyActivity = async (activity: Omit<DailyActivity, 'id'>) => {
-    if (!isFleetOfficerOrAdmin) return;
+    if (!canEditDailyActivities) return;
+    mutationEpochRef.current += 1;
     const newAct: DailyActivity = {
       ...activity,
       id: `act-${Date.now()}`,
@@ -976,21 +1046,25 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       });
       if (res.error) {
         console.error('Daily activity insert error:', res.error);
-        showSyncNotification('✗ Failed to sync daily activity');
+        showSyncNotification(`✗ Failed to sync daily activity: ${res.error}`);
         setDailyActivities((prev) => prev.filter((a) => a.id !== newAct.id));
       } else {
         showSyncNotification('✓ Daily Activity added & published to QD Schedule!');
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('Daily activity insert exception:', e);
-      showSyncNotification('✗ Failed to sync daily activity');
+      showSyncNotification(`✗ Failed to sync daily activity: ${e?.message || e}`);
       setDailyActivities((prev) => prev.filter((a) => a.id !== newAct.id));
     }
   };
 
   const updateDailyActivity = async (id: string, partial: Partial<DailyActivity>) => {
-    if (!isFleetOfficerOrAdmin) return;
+    if (!canEditDailyActivities) return;
+    mutationEpochRef.current += 1;
     const previousActivities = dailyActivities;
+    const existing = dailyActivities.find((a) => a.id === id);
+    const updatedItem = existing ? { ...existing, ...partial } : undefined;
+
     setDailyActivities((prev) =>
       prev
         .map((a) => (a.id === id ? { ...a, ...partial } : a))
@@ -1007,24 +1081,39 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (partial.category !== undefined) updateObj.category = partial.category;
       if (partial.isMandatory !== undefined) updateObj.is_mandatory = partial.isMandatory;
       if (Object.keys(updateObj).length > 0) {
-        const res = await apiPut(`daily-activities/${id}`, updateObj);
+        let res = await apiPut(`daily-activities/${id}`, updateObj);
+        // If row didn't exist yet in Supabase, upsert it cleanly
+        if (res.error && /not found/i.test(res.error) && updatedItem) {
+          res = await apiPost('daily-activities', {
+            id: updatedItem.id,
+            code: updatedItem.code,
+            name: updatedItem.name,
+            start_time: updatedItem.startTime,
+            end_time: updatedItem.endTime,
+            location: updatedItem.location,
+            description: updatedItem.description,
+            is_mandatory: updatedItem.isMandatory,
+            category: updatedItem.category,
+          });
+        }
         if (res.error) {
           console.error('Daily activity update error:', res.error);
-          showSyncNotification('✗ Failed to sync daily activity update');
+          showSyncNotification(`✗ Failed to sync daily activity update: ${res.error}`);
           setDailyActivities(previousActivities);
         } else {
           showSyncNotification('✓ Daily Activity updated & synced live!');
         }
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('Daily activity update exception:', e);
-      showSyncNotification('✗ Failed to sync daily activity update');
+      showSyncNotification(`✗ Failed to sync daily activity update: ${e?.message || e}`);
       setDailyActivities(previousActivities);
     }
   };
 
   const deleteDailyActivity = async (id: string) => {
-    if (!isFleetOfficerOrAdmin) return;
+    if (!canEditDailyActivities) return;
+    mutationEpochRef.current += 1;
     const previousActivities = dailyActivities;
     setDailyActivities((prev) => prev.filter((a) => a.id !== id));
 
@@ -1032,20 +1121,20 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const res = await apiDelete(`daily-activities/${id}`);
       if (res.error) {
         console.error('Daily activity delete error:', res.error);
-        showSyncNotification('✗ Failed to delete daily activity from database');
+        showSyncNotification(`✗ Failed to delete daily activity: ${res.error}`);
         setDailyActivities(previousActivities);
       } else {
         showSyncNotification('✓ Daily Activity deleted from QD Schedule!');
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('Daily activity delete exception:', e);
-      showSyncNotification('✗ Failed to delete daily activity from database');
+      showSyncNotification(`✗ Failed to delete daily activity: ${e?.message || e}`);
       setDailyActivities(previousActivities);
     }
   };
 
-  // Memo Groups (Admin Only)
-  const createMemoGroup = (name: string, description?: string): boolean => {
+  // Memo Groups (Admin Only) - synced to Supabase board_meta
+  const createMemoGroup = async (name: string, description?: string): Promise<boolean> => {
     if (!isAdmin) return false;
     const cleanName = name.trim();
     if (!cleanName) return false;
@@ -1053,29 +1142,59 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return false;
     }
 
+    mutationEpochRef.current += 1;
+    const previousGroups = memoGroups;
     const newGroup: MemoGroup = {
       id: `grp-${Date.now()}`,
       name: cleanName,
       description: description?.trim() || '',
       createdAt: toISODateString(new Date()),
     };
-    setMemoGroups((prev) => [...prev, newGroup]);
-    showSyncNotification('✓ Memo Group created!');
+    const nextGroups = [...memoGroups, newGroup];
+    setMemoGroups(nextGroups);
+
+    const res = await apiPost('board-meta', { key: 'memo_groups', value: nextGroups });
+    if (res.error) {
+      setMemoGroups(previousGroups);
+      showSyncNotification(`✗ Failed to save memo group: ${res.error}`);
+      return false;
+    }
+    showSyncNotification('✓ Memo Group created & synced!');
     return true;
   };
 
-  const updateMemoGroup = (id: string, name: string, description?: string) => {
+  const updateMemoGroup = async (id: string, name: string, description?: string) => {
     if (!isAdmin) return;
-    setMemoGroups((prev) =>
-      prev.map((g) => (g.id === id ? { ...g, name: name.trim(), description: description?.trim() } : g))
+    mutationEpochRef.current += 1;
+    const previousGroups = memoGroups;
+    const nextGroups = memoGroups.map((g) =>
+      g.id === id ? { ...g, name: name.trim(), description: description?.trim() } : g
     );
-    showSyncNotification('✓ Memo Group updated!');
+    setMemoGroups(nextGroups);
+
+    const res = await apiPost('board-meta', { key: 'memo_groups', value: nextGroups });
+    if (res.error) {
+      setMemoGroups(previousGroups);
+      showSyncNotification(`✗ Failed to update memo group: ${res.error}`);
+      return;
+    }
+    showSyncNotification('✓ Memo Group updated & synced!');
   };
 
-  const deleteMemoGroup = (id: string) => {
+  const deleteMemoGroup = async (id: string) => {
     if (!isAdmin) return;
-    setMemoGroups((prev) => prev.filter((g) => g.id !== id));
-    showSyncNotification('✓ Memo Group removed!');
+    mutationEpochRef.current += 1;
+    const previousGroups = memoGroups;
+    const nextGroups = memoGroups.filter((g) => g.id !== id);
+    setMemoGroups(nextGroups);
+
+    const res = await apiPost('board-meta', { key: 'memo_groups', value: nextGroups });
+    if (res.error) {
+      setMemoGroups(previousGroups);
+      showSyncNotification(`✗ Failed to delete memo group: ${res.error}`);
+      return;
+    }
+    showSyncNotification('✓ Memo Group removed & synced!');
   };
 
   // Memorandum upload (Fleet Officer or Admin) - synced with Supabase
@@ -1089,10 +1208,11 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     storageError?: string;
     dbError?: string;
   }> => {
-    if (!isFleetOfficerOrAdmin) {
+    if (!canUploadMemos) {
       return { success: false, dbSaved: false, storageSaved: false, dbError: 'Unauthorized' };
     }
 
+    mutationEpochRef.current += 1;
     let fileUrl = memo.fileUrl || '';
     let storageSaved = false;
     let storageError: string | undefined;
@@ -1121,28 +1241,36 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if (uploadRes.data?.fileUrl) {
           fileUrl = uploadRes.data.fileUrl;
           storageSaved = true;
-        } else if (uploadRes.error) {
-          storageError = uploadRes.error;
-          console.warn('Storage upload notice:', uploadRes.error);
+        } else {
+          storageError = uploadRes.error || 'Storage upload returned no URL';
+          showSyncNotification(`✗ Failed to upload memo file: ${storageError}`);
+          return {
+            success: false,
+            dbSaved: false,
+            storageSaved: false,
+            storageError,
+          };
         }
       } catch (err: any) {
         storageError = err?.message || 'Storage upload exception';
-        console.warn('Storage upload exception:', err);
+        showSyncNotification(`✗ Failed to upload memo file: ${storageError}`);
+        return {
+          success: false,
+          dbSaved: false,
+          storageSaved: false,
+          storageError,
+        };
       }
     }
 
-    const newId = `memo-${Date.now()}`;
     const newMemo: Memorandum = {
       ...memo,
-      id: newId,
+      id: `memo-${Date.now()}`,
       fileUrl,
       uploadDate: toISODateString(new Date()),
       uploadedBy: currentUser?.id || 'usr-anon',
       uploadedByName: currentUser?.fullName || 'Fleet Officer',
     };
-
-    let dbSaved = false;
-    let dbError: string | undefined;
 
     // 2. Insert record into database table 'memos' via API
     try {
@@ -1167,25 +1295,36 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       if (!res.error && res.data?.id) {
         newMemo.id = res.data.id;
-        dbSaved = true;
-      } else if (res.error) {
-        dbError = res.error;
-        console.warn('Database insert notice:', res.error);
+        setMemos((prev) => [newMemo, ...prev]);
+        showSyncNotification('✓ Memorandum uploaded & saved to Database repository!');
+        return {
+          success: true,
+          dbSaved: true,
+          storageSaved,
+          storageError,
+        };
+      } else {
+        const dbError = res.error || 'Database insert failed';
+        showSyncNotification(`✗ Failed to save memorandum to database: ${dbError}`);
+        return {
+          success: false,
+          dbSaved: false,
+          storageSaved,
+          storageError,
+          dbError,
+        };
       }
     } catch (err: any) {
-      dbError = err?.message || 'Database insert exception';
-      console.warn('Database insert exception:', err);
+      const dbError = err?.message || 'Database insert exception';
+      showSyncNotification(`✗ Failed to save memorandum to database: ${dbError}`);
+      return {
+        success: false,
+        dbSaved: false,
+        storageSaved,
+        storageError,
+        dbError,
+      };
     }
-
-    setMemos((prev) => [newMemo, ...prev]);
-    showSyncNotification('✓ Memorandum uploaded & saved to Database repository!');
-    return {
-      success: true,
-      dbSaved,
-      storageSaved,
-      storageError,
-      dbError,
-    };
   };
 
   const updateMemorandum = async (
@@ -1193,10 +1332,9 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     partial: Partial<Memorandum>
   ): Promise<boolean> => {
     if (!canUploadMemos) return false;
+    mutationEpochRef.current += 1;
     const previousMemos = memos;
-    setMemos((prev) =>
-      prev.map((m) => (m.id === id ? { ...m, ...partial } : m))
-    );
+    setMemos((prev) => prev.map((m) => (m.id === id ? { ...m, ...partial } : m)));
 
     try {
       const updateData: Record<string, any> = {};
@@ -1212,16 +1350,16 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const res = await apiPut(`memos/${id}`, updateData);
         if (res.error) {
           console.error('Update memorandum error:', res.error);
-          showSyncNotification('✗ Failed to sync memorandum update');
+          showSyncNotification(`✗ Failed to sync memorandum update: ${res.error}`);
           setMemos(previousMemos);
           return false;
         }
       }
       showSyncNotification('✓ Memorandum updated in Database!');
       return true;
-    } catch (err) {
+    } catch (err: any) {
       console.error('Update memorandum exception:', err);
-      showSyncNotification('✗ Failed to sync memorandum update');
+      showSyncNotification(`✗ Failed to sync memorandum update: ${err?.message || err}`);
       setMemos(previousMemos);
       return false;
     }
@@ -1229,6 +1367,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const deleteMemorandum = async (id: string) => {
     if (!canUploadMemos) return;
+    mutationEpochRef.current += 1;
     const previousMemos = memos;
     setMemos((prev) => prev.filter((m) => m.id !== id));
 
@@ -1236,14 +1375,14 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const res = await apiDelete(`memos/${id}`);
       if (res.error) {
         console.error('Delete memorandum error:', res.error);
-        showSyncNotification('✗ Failed to delete memorandum from database');
+        showSyncNotification(`✗ Failed to delete memorandum: ${res.error}`);
         setMemos(previousMemos);
       } else {
         showSyncNotification('✓ Memorandum removed from Database!');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Delete memorandum exception:', err);
-      showSyncNotification('✗ Failed to delete memorandum from database');
+      showSyncNotification(`✗ Failed to delete memorandum: ${err?.message || err}`);
       setMemos(previousMemos);
     }
   };
@@ -1253,6 +1392,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     item: Omit<Announcement, 'id' | 'postedAt' | 'date' | 'postedBy' | 'postedByName'>
   ) => {
     if (!canPostAnnouncements) return;
+    mutationEpochRef.current += 1;
     const today = toISODateString(new Date());
     const newAnnouncement: Announcement = {
       ...item,
@@ -1280,20 +1420,21 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       });
       if (res.error) {
         console.error('Announcements insert error:', res.error);
-        showSyncNotification('✗ Failed to sync announcement');
+        showSyncNotification(`✗ Failed to sync announcement: ${res.error}`);
         setAnnouncements((prev) => prev.filter((a) => a.id !== newAnnouncement.id));
       } else {
         showSyncNotification(`✓ Announcement posted & broadcast live to ${newAnnouncement.targetAudience || 'Fleet'}!`);
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('Announcements insert exception:', e);
-      showSyncNotification('✗ Failed to sync announcement');
+      showSyncNotification(`✗ Failed to sync announcement: ${e?.message || e}`);
       setAnnouncements((prev) => prev.filter((a) => a.id !== newAnnouncement.id));
     }
   };
 
   const updateAnnouncement = async (id: string, partial: Partial<Announcement>) => {
     if (!canPostAnnouncements) return;
+    mutationEpochRef.current += 1;
     const previousAnnouncements = announcements;
     setAnnouncements((prev) =>
       prev.map((a) => (a.id === id ? { ...a, ...partial } : a))
@@ -1312,21 +1453,22 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const res = await apiPut(`announcements/${id}`, updateData);
         if (res.error) {
           console.error('Announcements update error:', res.error);
-          showSyncNotification('✗ Failed to sync announcement update');
+          showSyncNotification(`✗ Failed to sync announcement update: ${res.error}`);
           setAnnouncements(previousAnnouncements);
         } else {
           showSyncNotification('✓ Announcement updated & broadcast live across all devices!');
         }
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('Announcements update exception:', e);
-      showSyncNotification('✗ Failed to sync announcement update');
+      showSyncNotification(`✗ Failed to sync announcement update: ${e?.message || e}`);
       setAnnouncements(previousAnnouncements);
     }
   };
 
   const deleteAnnouncement = async (id: string) => {
     if (!canPostAnnouncements) return;
+    mutationEpochRef.current += 1;
     const previousAnnouncements = announcements;
     setAnnouncements((prev) => prev.filter((a) => a.id !== id));
 
@@ -1334,14 +1476,14 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const res = await apiDelete(`announcements/${id}`);
       if (res.error) {
         console.error('Announcements delete error:', res.error);
-        showSyncNotification('✗ Failed to delete announcement from database');
+        showSyncNotification(`✗ Failed to delete announcement: ${res.error}`);
         setAnnouncements(previousAnnouncements);
       } else {
         showSyncNotification('✓ Announcement deleted from Database!');
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('Announcements delete exception:', e);
-      showSyncNotification('✗ Failed to delete announcement from database');
+      showSyncNotification(`✗ Failed to delete announcement: ${e?.message || e}`);
       setAnnouncements(previousAnnouncements);
     }
   };
@@ -1384,36 +1526,23 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const updateDutyItem = async (id: string, partial: Partial<DutyRosterItem>) => {
     if (!canEditDuties) return;
 
+    mutationEpochRef.current += 1;
+    const previousRoster = dutyRoster;
     const todayStr = toISODateString(new Date());
-    const currentItem = dutyRoster.find((d) => d.id === id || d.date === todayStr) || dutyRoster[0] || {
-      id: id || `dty-${todayStr}`,
-      date: todayStr,
-      fod: '',
-      coow: '',
-      acoow1: '',
-      acoow2: '',
-      moow: '',
-      amoow1: '',
-      amoow2: '',
-      station: 'Quarterdeck Main Desk',
-      status: 'ON_WATCH',
-    };
+    const currentItem =
+      dutyRoster.find((d) => d.id === id) ||
+      selectActiveDuty(dutyRoster);
 
     const targetObj: DutyRosterItem = {
       ...currentItem,
       ...partial,
-      id: currentItem.id || id || `dty-${todayStr}`,
+      id: currentItem.id || id || 'dty-01',
       date: todayStr,
     };
 
     setDutyRoster((prev) => {
-      const idx = prev.findIndex((d) => d.id === targetObj.id);
-      if (idx >= 0) {
-        const copy = [...prev];
-        copy[idx] = targetObj;
-        return copy;
-      }
-      return [targetObj, ...prev];
+      const filtered = prev.filter((d) => d.id !== targetObj.id);
+      return [targetObj, ...filtered];
     });
 
     try {
@@ -1432,33 +1561,36 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       });
       if (res.error) {
         console.error('Duties upsert error:', res.error);
+        setDutyRoster(previousRoster);
         showSyncNotification(`✗ Failed to sync watch bill: ${res.error}`);
       } else {
         showSyncNotification('✓ Watch Bill (FOD / COOW / MOOW) saved & broadcast live across all devices!');
       }
     } catch (e: any) {
       console.error('Duties upsert exception:', e);
+      setDutyRoster(previousRoster);
       showSyncNotification(`✗ Failed to sync watch bill: ${e?.message || e}`);
     }
   };
 
   // Standing Orders & Board Meta Handlers
   const updateStandingOrders = async (orders: string[]) => {
+    if (!canEditDailyActivities) return;
+    mutationEpochRef.current += 1;
     const previousOrders = standingOrders;
     setStandingOrders(orders);
-    saveToStorage('standing_orders', orders);
     try {
       const res = await apiPost('standing-orders', { orders });
       if (res.error) {
         console.error('Standing orders post error:', res.error);
-        showSyncNotification('✗ Failed to sync standing orders');
+        showSyncNotification(`✗ Failed to sync standing orders: ${res.error}`);
         setStandingOrders(previousOrders);
       } else {
         showSyncNotification('✓ Standing Orders saved & broadcast live to all devices!');
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('Standing orders post exception:', e);
-      showSyncNotification('✗ Failed to sync standing orders');
+      showSyncNotification(`✗ Failed to sync standing orders: ${e?.message || e}`);
       setStandingOrders(previousOrders);
     }
   };
@@ -1469,91 +1601,78 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     secondaryLabel: string;
     secondaryValue: string;
   }) => {
+    if (!canEditDailyActivities) return;
+    mutationEpochRef.current += 1;
     const previousUniformData = uniformData;
     setUniformData(data);
-    saveToStorage('uniform_requirements', data);
     try {
       const res = await apiPost('board-meta', { key: 'uniforms', value: data });
       if (res.error) {
         console.error('Uniform data post error:', res.error);
-        showSyncNotification('✗ Failed to sync uniform requirements');
+        showSyncNotification(`✗ Failed to sync uniform requirements: ${res.error}`);
         setUniformData(previousUniformData);
       } else {
         showSyncNotification('✓ Uniform Requirements saved & synced live!');
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('Uniform data post exception:', e);
-      showSyncNotification('✗ Failed to sync uniform requirements');
+      showSyncNotification(`✗ Failed to sync uniform requirements: ${e?.message || e}`);
       setUniformData(previousUniformData);
     }
   };
 
   const updateFleetData = async (data: any) => {
+    if (!canEditDailyActivities) return;
+    mutationEpochRef.current += 1;
     const previousFleetData = fleetData;
     setFleetData(data);
-    saveToStorage('fleet_roster', data);
     try {
       const res = await apiPost('board-meta', { key: 'fleet_roster', value: data });
       if (res.error) {
         console.error('Fleet data post error:', res.error);
-        showSyncNotification('✗ Failed to sync fleet roster');
+        showSyncNotification(`✗ Failed to sync fleet roster: ${res.error}`);
         setFleetData(previousFleetData);
       } else {
         showSyncNotification('✓ Fleet Section Roster saved & updated live!');
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('Fleet data post exception:', e);
-      showSyncNotification('✗ Failed to sync fleet roster');
+      showSyncNotification(`✗ Failed to sync fleet roster: ${e?.message || e}`);
       setFleetData(previousFleetData);
     }
   };
 
   const updateStrengthRows = async (rows: any[], asOf: string) => {
+    if (!canEditDailyActivities) return;
+    mutationEpochRef.current += 1;
     const previousStrengthRows = strengthRows;
     const previousStrengthAsOf = strengthAsOf;
     setStrengthRows(rows);
     setStrengthAsOf(asOf);
-    saveToStorage('total_strength', rows);
-    saveToStorage('strength_as_of', asOf);
     try {
       const res = await apiPost('board-meta', { key: 'total_strength', value: { rows, asOf } });
       if (res.error) {
         console.error('Strength rows post error:', res.error);
-        showSyncNotification('✗ Failed to sync personnel strength');
+        showSyncNotification(`✗ Failed to sync personnel strength: ${res.error}`);
         setStrengthRows(previousStrengthRows);
         setStrengthAsOf(previousStrengthAsOf);
       } else {
         showSyncNotification('✓ Total Personnel Strength saved & synced live across all devices!');
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('Strength rows post exception:', e);
-      showSyncNotification('✗ Failed to sync personnel strength');
+      showSyncNotification(`✗ Failed to sync personnel strength: ${e?.message || e}`);
       setStrengthRows(previousStrengthRows);
       setStrengthAsOf(previousStrengthAsOf);
     }
   };
 
-  // Daily Reset Simulator
+  // Daily Reset Simulator (resets date & local muster roll without wiping Supabase board data)
   const simulateDailyReset = () => {
     const today = toISODateString(new Date());
     setLastResetDate(today);
-
-    // 1. Reset Mustering to fresh present roster
     resetMusterRoll();
-
-    // 2. Reset Announcements to today's active QD notices
-    setAnnouncements(getInitialAnnouncements());
-
-    // 3. Reset Daily Activities to base routine
-    setDailyActivities(INITIAL_DAILY_ACTIVITIES);
-
-    // 4. Update today's initial events to match current date
-    setEvents(getInitialEvents());
-
-    // Set interactive visual toast
-    setResetNotification(
-      `Daily Reset Activated for ${today}: QD Daily Schedule, Public Announcements, and Mustering Roll renewed.`
-    );
+    showSyncNotification(`✓ Daily Cycle Refreshed for ${today}.`);
   };
 
   const clearResetNotification = () => setResetNotification(null);

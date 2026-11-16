@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useFleet } from '../../context/FleetContext';
 import { MemoGroup, Memorandum } from '../../types';
+import { toISODateString } from '../../utils/timeConflict';
 import {
   FileText,
   Upload,
@@ -66,7 +67,7 @@ export const MemoRepositoryView: React.FC<{ onOpenLogin: () => void }> = ({ onOp
     submessage?: string;
   } | null>(null);
   const [uploadEffectiveDate, setUploadEffectiveDate] = useState(
-    new Date().toISOString().split('T')[0]
+    toISODateString(new Date())
   );
   const [uploadSignatory, setUploadSignatory] = useState(
     currentUser?.fullName || 'Administrator'
@@ -188,25 +189,26 @@ export const MemoRepositoryView: React.FC<{ onOpenLogin: () => void }> = ({ onOp
     setUploadStatus(null);
     setIsUploadOpen(false);
 
-    if (res.storageError) {
+    if (!res.success) {
+      setUploadFeedback({
+        type: 'error',
+        message: 'Failed to save Memorandum to Supabase!',
+        submessage: res.storageError || res.dbError || 'Please check your connection and try again.',
+      });
+    } else if (res.storageError) {
       setUploadFeedback({
         type: 'warning',
         message: 'Memo document saved to Supabase Database!',
         submessage:
-          'Note: PDF/DOCX file binary requires Supabase Storage bucket RLS policy to allow uploads. Click "View SQL Setup" to enable.',
+          'Note: PDF/DOCX file binary requires Supabase Storage bucket policy to allow uploads. Click "View SQL Setup" to enable.',
       });
-    } else if (res.dbSaved || res.storageSaved) {
+    } else {
       setUploadFeedback({
         type: 'success',
         message: 'Memo successfully published & synchronized to Supabase Cloud!',
         submessage: selectedFile
           ? 'File binary is hosted on Supabase Storage and metadata is recorded in the memos table.'
           : 'Metadata record is saved in the Supabase memos table.',
-      });
-    } else {
-      setUploadFeedback({
-        type: 'success',
-        message: 'Memo published successfully!',
       });
     }
   };
@@ -227,14 +229,14 @@ export const MemoRepositoryView: React.FC<{ onOpenLogin: () => void }> = ({ onOp
     setIsGroupModalOpen(true);
   };
 
-  const handleGroupSubmit = (e: React.FormEvent) => {
+  const handleGroupSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!groupNameInput.trim()) return;
 
     if (editingGroup) {
-      updateMemoGroup(editingGroup.id, groupNameInput.trim(), groupDescInput.trim());
+      await updateMemoGroup(editingGroup.id, groupNameInput.trim(), groupDescInput.trim());
     } else {
-      createMemoGroup(groupNameInput.trim(), groupDescInput.trim());
+      await createMemoGroup(groupNameInput.trim(), groupDescInput.trim());
     }
     setIsGroupModalOpen(false);
   };

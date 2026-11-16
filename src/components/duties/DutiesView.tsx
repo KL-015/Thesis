@@ -1,25 +1,11 @@
 import React, { useState } from 'react';
-import { useFleet } from '../../context/FleetContext';
+import { useFleet, selectActiveDuty } from '../../context/FleetContext';
 import { Edit2, X, Check } from 'lucide-react';
 
 export const DutiesView: React.FC<{ onOpenLogin: () => void }> = ({ onOpenLogin }) => {
   const { dutyRoster, updateDutyItem, canEditDuties: isFleetOfficerOrAdmin } = useFleet();
 
-  const todayStr = new Date().toISOString().split('T')[0];
-  const currentDuty = dutyRoster.find((d) => d.date === todayStr) || dutyRoster[0] || {
-    id: `dty-${todayStr}`,
-    date: todayStr,
-    fod: '',
-    coow: '',
-    acoow1: '',
-    acoow2: '',
-    acwo: '',
-    moow: '',
-    amoow1: '',
-    amoow2: '',
-    station: 'Quarterdeck Main Desk',
-    status: 'ON_WATCH',
-  };
+  const currentDuty = selectActiveDuty(dutyRoster);
 
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
 

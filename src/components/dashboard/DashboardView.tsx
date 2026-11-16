@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { useFleet } from '../../context/FleetContext';
+import { useFleet, selectActiveDuty } from '../../context/FleetContext';
 import {
   militaryTimeToMinutes,
   getCurrentMilitaryTime,
@@ -45,7 +45,7 @@ export const DashboardView: React.FC<{ onOpenLogin: () => void }> = ({ onOpenLog
   }, [events, todayStr]);
 
   const currentWatch = useMemo(() => {
-    return dutyRoster.find((d) => d.status === 'ON_WATCH') || dutyRoster[0];
+    return selectActiveDuty(dutyRoster);
   }, [dutyRoster]);
 
   const latestAnnouncement = announcements[0];
@@ -228,9 +228,9 @@ export const DashboardView: React.FC<{ onOpenLogin: () => void }> = ({ onOpenLog
             <span className="text-[11px] text-blue-300 font-semibold group-hover:translate-x-0.5 transition-transform">View →</span>
           </div>
           <p className="text-xs font-semibold text-white">
-            FOD: <span className="text-blue-200">{currentWatch.fod}</span>
+            FOD: <span className="text-blue-200">{currentWatch?.fod || 'Unassigned'}</span>
           </p>
-          <p className="text-[11px] text-white/60">COOW: {currentWatch.coow}</p>
+          <p className="text-[11px] text-white/60">COOW: {currentWatch?.coow || 'Unassigned'}</p>
         </div>
 
         {/* Memo Repository */}
