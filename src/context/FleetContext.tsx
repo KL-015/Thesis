@@ -1238,8 +1238,9 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           fileFormat: memo.fileFormat,
         });
 
-        if (uploadRes.data?.fileUrl) {
-          fileUrl = uploadRes.data.fileUrl;
+        const resolvedFileUrl = uploadRes.data?.fileUrl || (uploadRes as any)?.fileUrl;
+        if (resolvedFileUrl) {
+          fileUrl = resolvedFileUrl;
           storageSaved = true;
         } else {
           storageError = uploadRes.error || 'Storage upload returned no URL';

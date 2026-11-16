@@ -613,7 +613,8 @@ app.post('/api/memos/upload-file', async (req, res) => {
     if (storageErr) return res.status(400).json({ error: storageErr.message });
 
     const { data: urlData } = supabase.storage.from('memos').getPublicUrl(storagePath);
-    return res.json({ fileUrl: urlData?.publicUrl || '' });
+    const fileUrl = urlData?.publicUrl || '';
+    return res.json({ data: { fileUrl }, fileUrl });
   } catch (err: any) {
     return res.status(500).json({ error: err?.message || 'Upload server error' });
   }
