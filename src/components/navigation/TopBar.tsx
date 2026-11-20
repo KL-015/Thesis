@@ -27,6 +27,8 @@ export const TopBar: React.FC<TopBarProps> = ({ onOpenLogin, onOpenAddUser }) =>
   const {
     activePage,
     setActivePage,
+    unreadTabs,
+    hasAnyUnreadTab,
     currentUser,
     logout,
     isAdmin,
@@ -69,9 +71,11 @@ export const TopBar: React.FC<TopBarProps> = ({ onOpenLogin, onOpenAddUser }) =>
             onClick={() => handleNavClick('dashboard')}
             className="flex items-center gap-2.5 sm:gap-3 text-left group cursor-pointer min-w-0"
           >
-            <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white shadow-[0_4px_14px_rgba(37,99,235,0.4)] border border-white/25 group-hover:scale-105 transition-transform duration-200 shrink-0">
-              <span className="text-sm sm:text-base font-bold">⚓</span>
-            </div>
+            <img
+              src="https://raw.githubusercontent.com/KL-015/Portfolio/b98d410b2ccfe1ae296e45db7b223c23b8cf00c4/schoold.png"
+              alt="FleetSync Logo"
+              className="w-9 h-9 sm:w-10 sm:h-10 object-contain rounded-xl shrink-0 group-hover:scale-105 transition-transform duration-200 drop-shadow-[0_2px_8px_rgba(0,0,0,0.35)]"
+            />
             <div className="min-w-0">
               <span className="text-sm sm:text-base font-bold text-white tracking-tight group-hover:text-blue-300 transition-colors block truncate">
                 FleetSync
@@ -144,10 +148,16 @@ export const TopBar: React.FC<TopBarProps> = ({ onOpenLogin, onOpenAddUser }) =>
           {/* Mobile Menu Toggle */}
           <button
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className="lg:hidden p-2 text-white hover:text-white rounded-full bg-white/10 border border-white/20 shadow-2xs cursor-pointer"
+            className="relative lg:hidden p-2 text-white hover:text-white rounded-full bg-white/10 border border-white/20 shadow-2xs cursor-pointer"
             aria-label="Toggle navigation"
           >
             {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            {!mobileMenuOpen && hasAnyUnreadTab && (
+              <span
+                aria-label="Unread updates"
+                className="pointer-events-none absolute top-0.5 right-0.5 w-2.5 h-2.5 rounded-full bg-[#FF3B30] shadow-[0_1px_4px_rgba(0,0,0,0.45)]"
+              />
+            )}
           </button>
         </div>
       </div>
@@ -157,6 +167,7 @@ export const TopBar: React.FC<TopBarProps> = ({ onOpenLogin, onOpenAddUser }) =>
         <div className="lg:hidden mx-2 sm:mx-4 my-2 p-3 bg-slate-900/95 rounded-3xl border border-white/20 shadow-2xl space-y-1 text-white">
           {navLinks.map((item) => {
             const isActive = activePage === item.id;
+            const hasUnread = !!unreadTabs[item.id];
             return (
               <button
                 key={item.id}
@@ -167,7 +178,15 @@ export const TopBar: React.FC<TopBarProps> = ({ onOpenLogin, onOpenAddUser }) =>
                     : 'text-white/80 hover:text-white hover:bg-white/10'
                 }`}
               >
-                {item.icon}
+                <span className="relative inline-flex shrink-0">
+                  {item.icon}
+                  {hasUnread && (
+                    <span
+                      aria-label="New update"
+                      className="pointer-events-none absolute -top-1 -right-1 w-2 h-2 rounded-full bg-[#FF3B30] shadow-[0_1px_3px_rgba(0,0,0,0.45)]"
+                    />
+                  )}
+                </span>
                 <span>{item.label}</span>
               </button>
             );

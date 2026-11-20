@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   UserAccount,
   UserRole,
@@ -39,10 +39,19 @@ export type AppPage =
   | 'memos'
   | 'accounts';
 
+export type TabUpdateEntry = {
+  updatedAt: number;
+  updatedBy?: string;
+};
+
+export type TabUpdatesMap = Partial<Record<AppPage, TabUpdateEntry>>;
+
 interface FleetContextType {
   // Navigation
   activePage: AppPage;
   setActivePage: (page: AppPage) => void;
+  unreadTabs: Partial<Record<AppPage, boolean>>;
+  hasAnyUnreadTab: boolean;
 
   // Auth & Roles (null = Normal Cadet / Unauthenticated Viewer)
   currentUser: UserAccount | null;
@@ -207,9 +216,20 @@ export function selectActiveDuty(dutyRoster: DutyRosterItem[]): DutyRosterItem {
 }
 
 export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [activePage, setActivePage] = useState<AppPage>('dashboard');
+  const [activePage, setActivePageState] = useState<AppPage>('dashboard');
   const mutationEpochRef = useRef(0);
   const notificationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [tabUpdates, setTabUpdates] = useState<TabUpdatesMap>(() =>
+    loadFromStorage<TabUpdatesMap>('tab_updates', {})
+  );
+  const tabUpdatesRef = useRef<TabUpdatesMap>(tabUpdates);
+  tabUpdatesRef.current = tabUpdates;
+
+  const [seenTabs, setSeenTabs] = useState<Partial<Record<AppPage, number>>>(() =>
+    loadFromStorage<Partial<Record<AppPage, number>>>('seen_tabs', {})
+  );
+  const seenTabsRef = useRef<Partial<Record<AppPage, number>>>(seenTabs);
+  seenTabsRef.current = seenTabs;
 
   // User auth state: default null (Normal Cadet)
   const [currentUser, setCurrentUser] = useState<UserAccount | null>(() => {
@@ -633,6 +653,18 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               }
             } else if (item.key === 'memo_groups' && Array.isArray(item.value)) {
               setIfChanged(setMemoGroups, item.value);
+            } else if (item.key === 'tab_updates' && item.value && typeof item.value === 'object') {
+              const incoming = item.value as TabUpdatesMap;
+              const merged: TabUpdatesMap = { ...tabUpdatesRef.current };
+              (Object.keys(incoming) as AppPage[]).forEach((tab) => {
+                const incEntry = incoming[tab];
+                const curEntry = merged[tab];
+                if (incEntry && (!curEntry || incEntry.updatedAt > curEntry.updatedAt)) {
+                  merged[tab] = incEntry;
+                }
+              });
+              tabUpdatesRef.current = merged;
+              setIfChanged(setTabUpdates, merged);
             }
           }
         }
@@ -688,6 +720,82 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const isFleetOfficerOrAdmin = !!currentUser;
   const hasSchedulingPermission = canAddCalendarEvents;
+
+  // Cross-user unread notification helpers
+  const markTabSeen = useCallback((page: AppPage, minTimestamp?: number) => {
+    const remoteTs = tabUpdatesRef.current[page]?.updatedAt || 0;
+    const nextTs = Math.max(Date.now(), remoteTs, minTimestamp || 0);
+    setSeenTabs((prev) => {
+      if ((prev[page] || 0) >= nextTs) return prev;
+      const next = { ...prev, [page]: nextTs };
+      seenTabsRef.current = next;
+      saveToStorage('seen_tabs', next);
+      return next;
+    });
+  }, []);
+
+  const setActivePage = useCallback(
+    (page: AppPage) => {
+      setActivePageState(page);
+      markTabSeen(page);
+    },
+    [markTabSeen]
+  );
+
+  // Keep seen timestamp advancing while user is actively viewing a tab that updates live
+  useEffect(() => {
+    const activeUpdatedAt = tabUpdates[activePage]?.updatedAt || 0;
+    if (activeUpdatedAt > (seenTabsRef.current[activePage] || 0)) {
+      markTabSeen(activePage, activeUpdatedAt);
+    }
+  }, [activePage, tabUpdates, markTabSeen]);
+
+  useEffect(() => {
+    saveToStorage('tab_updates', tabUpdates);
+  }, [tabUpdates]);
+
+  const recordTabUpdate = useCallback(
+    (tabs: AppPage[]) => {
+      if (!currentUser || tabs.length === 0) return;
+      const now = Date.now();
+      const nextUpdates: TabUpdatesMap = { ...tabUpdatesRef.current };
+      tabs.forEach((tab) => {
+        nextUpdates[tab] = {
+          updatedAt: Math.max(now, (nextUpdates[tab]?.updatedAt || 0) + 1),
+          updatedBy: currentUser.fullName || 'Fleet Officer',
+        };
+      });
+      tabUpdatesRef.current = nextUpdates;
+      setTabUpdates(nextUpdates);
+      if (tabs.includes(activePage)) {
+        markTabSeen(activePage, nextUpdates[activePage]?.updatedAt);
+      }
+      apiPost('board-meta', { key: 'tab_updates', value: nextUpdates }).catch((err) => {
+        console.warn('Failed to persist tab_updates notification marker:', err);
+      });
+    },
+    [currentUser, activePage, markTabSeen]
+  );
+
+  const unreadTabs = useMemo<Partial<Record<AppPage, boolean>>>(() => {
+    const result: Partial<Record<AppPage, boolean>> = {};
+    (Object.keys(tabUpdates) as AppPage[]).forEach((tab) => {
+      if (tab === activePage) return;
+      if (tab === 'accounts' && !isAdmin) return;
+      if (tab === 'mustering' && (!currentUser || !canConductMustering)) return;
+      const updatedAt = tabUpdates[tab]?.updatedAt || 0;
+      const seenAt = seenTabs[tab] || 0;
+      if (updatedAt > seenAt) {
+        result[tab] = true;
+      }
+    });
+    return result;
+  }, [tabUpdates, seenTabs, activePage, isAdmin, currentUser, canConductMustering]);
+
+  const hasAnyUnreadTab = useMemo(
+    () => Object.values(unreadTabs).some(Boolean),
+    [unreadTabs]
+  );
 
   // Login handler
   const login = (
@@ -799,6 +907,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         return { success: false, supabaseSaved: false, error: res.error };
       }
 
+      recordTabUpdate(['accounts']);
       showSyncNotification('✓ Officer account saved & synced to Database!');
       return { success: true, supabaseSaved: true };
     } catch (err: any) {
@@ -847,6 +956,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               created_at: new Date().toISOString(),
             });
             if (!createRes.error) {
+              recordTabUpdate(['accounts']);
               showSyncNotification('✓ User account updated & synced!');
               return;
             }
@@ -858,6 +968,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             setCurrentUser(previousCurrentUser);
           }
         } else {
+          recordTabUpdate(['accounts']);
           showSyncNotification('✓ User account updated & synced!');
         }
       }
@@ -891,6 +1002,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           setCurrentUser(previousCurrentUser);
         }
       } else {
+        recordTabUpdate(['accounts']);
         showSyncNotification('✓ User account removed from database!');
       }
     } catch (err: any) {
@@ -967,6 +1079,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setEvents((prev) => prev.filter((e) => e.id !== newEvent.id));
         return { success: false, conflictResult };
       }
+      recordTabUpdate(['calendar']);
       showSyncNotification('✓ Fleet Calendar Event saved & synced live!');
       return { success: true, conflictResult, createdId: newId };
     } catch (e: any) {
@@ -1014,6 +1127,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           showSyncNotification(`✗ Failed to sync event update: ${res.error}`);
           setEvents(previousEvents);
         } else {
+          recordTabUpdate(['calendar']);
           showSyncNotification('✓ Fleet Event updated & synced to Database!');
         }
       }
@@ -1037,6 +1151,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         showSyncNotification(`✗ Failed to delete event from database: ${res.error}`);
         setEvents(previousEvents);
       } else {
+        recordTabUpdate(['calendar']);
         showSyncNotification('✓ Fleet Event removed from Database!');
       }
     } catch (e: any) {
@@ -1076,6 +1191,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         showSyncNotification(`✗ Failed to sync daily activity: ${res.error}`);
         setDailyActivities((prev) => prev.filter((a) => a.id !== newAct.id));
       } else {
+        recordTabUpdate(['daily']);
         showSyncNotification('✓ Daily Activity added & published to QD Schedule!');
       }
     } catch (e: any) {
@@ -1128,6 +1244,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           showSyncNotification(`✗ Failed to sync daily activity update: ${res.error}`);
           setDailyActivities(previousActivities);
         } else {
+          recordTabUpdate(['daily']);
           showSyncNotification('✓ Daily Activity updated & synced live!');
         }
       }
@@ -1151,6 +1268,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         showSyncNotification(`✗ Failed to delete daily activity: ${res.error}`);
         setDailyActivities(previousActivities);
       } else {
+        recordTabUpdate(['daily']);
         showSyncNotification('✓ Daily Activity deleted from QD Schedule!');
       }
     } catch (e: any) {
@@ -1186,6 +1304,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       showSyncNotification(`✗ Failed to save memo group: ${res.error}`);
       return false;
     }
+    recordTabUpdate(['memos']);
     showSyncNotification('✓ Memo Group created & synced!');
     return true;
   };
@@ -1205,6 +1324,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       showSyncNotification(`✗ Failed to update memo group: ${res.error}`);
       return;
     }
+    recordTabUpdate(['memos']);
     showSyncNotification('✓ Memo Group updated & synced!');
   };
 
@@ -1221,6 +1341,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       showSyncNotification(`✗ Failed to delete memo group: ${res.error}`);
       return;
     }
+    recordTabUpdate(['memos']);
     showSyncNotification('✓ Memo Group removed & synced!');
   };
 
@@ -1324,6 +1445,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (!res.error && res.data?.id) {
         newMemo.id = res.data.id;
         setMemos((prev) => [newMemo, ...prev]);
+        recordTabUpdate(['memos']);
         showSyncNotification('✓ Memorandum uploaded & saved to Database repository!');
         return {
           success: true,
@@ -1383,6 +1505,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           return false;
         }
       }
+      recordTabUpdate(['memos']);
       showSyncNotification('✓ Memorandum updated in Database!');
       return true;
     } catch (err: any) {
@@ -1406,6 +1529,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         showSyncNotification(`✗ Failed to delete memorandum: ${res.error}`);
         setMemos(previousMemos);
       } else {
+        recordTabUpdate(['memos']);
         showSyncNotification('✓ Memorandum removed from Database!');
       }
     } catch (err: any) {
@@ -1451,6 +1575,12 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         showSyncNotification(`✗ Failed to sync announcement: ${res.error}`);
         setAnnouncements((prev) => prev.filter((a) => a.id !== newAnnouncement.id));
       } else {
+        const isMusterNotice =
+          newAnnouncement.category === 'MUSTERING' ||
+          newAnnouncement.category === 'OFFICER DIRECTIVE' ||
+          newAnnouncement.title.toUpperCase().includes('MUSTERING') ||
+          newAnnouncement.title.toUpperCase().includes('MUSTER');
+        recordTabUpdate([isMusterNotice ? 'mustering' : 'announcements']);
         showSyncNotification(`✓ Announcement posted & broadcast live to ${newAnnouncement.targetAudience || 'Fleet'}!`);
       }
     } catch (e: any) {
@@ -1464,6 +1594,8 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (!canPostAnnouncements) return;
     mutationEpochRef.current += 1;
     const previousAnnouncements = announcements;
+    const existingAnn = announcements.find((a) => a.id === id);
+    const mergedAnn = existingAnn ? { ...existingAnn, ...partial } : partial;
     setAnnouncements((prev) =>
       prev.map((a) => (a.id === id ? { ...a, ...partial } : a))
     );
@@ -1484,6 +1616,12 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           showSyncNotification(`✗ Failed to sync announcement update: ${res.error}`);
           setAnnouncements(previousAnnouncements);
         } else {
+          const isMusterNotice =
+            mergedAnn.category === 'MUSTERING' ||
+            mergedAnn.category === 'OFFICER DIRECTIVE' ||
+            (mergedAnn.title || '').toUpperCase().includes('MUSTERING') ||
+            (mergedAnn.title || '').toUpperCase().includes('MUSTER');
+          recordTabUpdate([isMusterNotice ? 'mustering' : 'announcements']);
           showSyncNotification('✓ Announcement updated & broadcast live across all devices!');
         }
       }
@@ -1498,6 +1636,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (!canPostAnnouncements) return;
     mutationEpochRef.current += 1;
     const previousAnnouncements = announcements;
+    const targetAnn = announcements.find((a) => a.id === id);
     setAnnouncements((prev) => prev.filter((a) => a.id !== id));
 
     try {
@@ -1507,6 +1646,12 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         showSyncNotification(`✗ Failed to delete announcement: ${res.error}`);
         setAnnouncements(previousAnnouncements);
       } else {
+        const isMusterNotice =
+          targetAnn?.category === 'MUSTERING' ||
+          targetAnn?.category === 'OFFICER DIRECTIVE' ||
+          (targetAnn?.title || '').toUpperCase().includes('MUSTERING') ||
+          (targetAnn?.title || '').toUpperCase().includes('MUSTER');
+        recordTabUpdate([isMusterNotice ? 'mustering' : 'announcements']);
         showSyncNotification('✓ Announcement deleted from Database!');
       }
     } catch (e: any) {
@@ -1535,6 +1680,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           : m
       )
     );
+    recordTabUpdate(['mustering']);
     showSyncNotification('✓ Mustering status updated!');
   };
 
@@ -1592,6 +1738,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setDutyRoster(previousRoster);
         showSyncNotification(`✗ Failed to sync watch bill: ${res.error}`);
       } else {
+        recordTabUpdate(['duties']);
         showSyncNotification('✓ Watch Bill (FOD / COOW / MOOW) saved & broadcast live across all devices!');
       }
     } catch (e: any) {
@@ -1614,6 +1761,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         showSyncNotification(`✗ Failed to sync standing orders: ${res.error}`);
         setStandingOrders(previousOrders);
       } else {
+        recordTabUpdate(['daily']);
         showSyncNotification('✓ Standing Orders saved & broadcast live to all devices!');
       }
     } catch (e: any) {
@@ -1640,6 +1788,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         showSyncNotification(`✗ Failed to sync uniform requirements: ${res.error}`);
         setUniformData(previousUniformData);
       } else {
+        recordTabUpdate(['daily']);
         showSyncNotification('✓ Uniform Requirements saved & synced live!');
       }
     } catch (e: any) {
@@ -1661,6 +1810,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         showSyncNotification(`✗ Failed to sync fleet roster: ${res.error}`);
         setFleetData(previousFleetData);
       } else {
+        recordTabUpdate(['daily']);
         showSyncNotification('✓ Fleet Section Roster saved & updated live!');
       }
     } catch (e: any) {
@@ -1685,6 +1835,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setStrengthRows(previousStrengthRows);
         setStrengthAsOf(previousStrengthAsOf);
       } else {
+        recordTabUpdate(['daily']);
         showSyncNotification('✓ Total Personnel Strength saved & synced live across all devices!');
       }
     } catch (e: any) {
@@ -1710,6 +1861,8 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       value={{
         activePage,
         setActivePage,
+        unreadTabs,
+        hasAnyUnreadTab,
         currentUser,
         users,
         login,
